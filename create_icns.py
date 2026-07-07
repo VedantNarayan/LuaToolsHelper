@@ -3,7 +3,8 @@ import subprocess
 
 image_path = "/Users/Vedant/.gemini/antigravity/brain/e37f62cf-42ba-4d9f-ad4d-ba98ae1c0eac/luatools_no_moon_icon_1783453449283.jpg"
 iconset_path = "AppIcon.iconset"
-output_icns = "icon-windowed.icns"
+output_icns = "AppIcon.icns"
+output_png = "AppIcon.png"
 
 # Create iconset folder
 os.makedirs(iconset_path, exist_ok=True)
@@ -33,7 +34,11 @@ print("Compiling iconset to icns...")
 cmd_compile = ["iconutil", "-c", "icns", iconset_path, "-o", output_icns]
 subprocess.run(cmd_compile)
 
+print("Creating AppIcon.png logo...")
+cmd_png = ["sips", "-s", "format", "png", "--resampleHeightWidth", "512", "512", image_path, "--out", output_png]
+subprocess.run(cmd_png, stdout=subprocess.DEVNULL)
+
 # Cleanup iconset
 import shutil
 shutil.rmtree(iconset_path)
-print("Success! Created AppIcon.icns")
+print("Success! Created AppIcon.icns and AppIcon.png")
