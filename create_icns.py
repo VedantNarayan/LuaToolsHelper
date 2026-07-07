@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-image_path = "/Users/Vedant/.gemini/antigravity/brain/e37f62cf-42ba-4d9f-ad4d-ba98ae1c0eac/luatools_new_icon_1783453139184.jpg"
+image_path = "/Users/Vedant/.gemini/antigravity/brain/e37f62cf-42ba-4d9f-ad4d-ba98ae1c0eac/luatools_no_moon_icon_1783453449283.jpg"
 iconset_path = "AppIcon.iconset"
 output_icns = "icon-windowed.icns"
 

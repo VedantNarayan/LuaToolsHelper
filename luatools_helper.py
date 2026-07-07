@@ -54,28 +54,32 @@ STATE_MANAGE = 4
 TK_IMAGE_CACHE = {}
 
 def get_game_image(appid):
-    """Downloads game capsule from Steam CDN, converts to PNG using sips, and returns the path to the PNG."""
+    """Downloads game capsule from Steam CDN, converts to GIF using sips, and returns the path to the GIF."""
     cache_dir = os.path.join(DEFAULT_TEMP_DIR, "image_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
     except Exception:
         pass
         
-    png_path = os.path.join(cache_dir, f"{appid}.png")
-    if os.path.exists(png_path):
-        return png_path
+    gif_path = os.path.join(cache_dir, f"{appid}.gif")
+    if os.path.exists(gif_path):
+        return gif_path
         
     jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
     url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
+        req.add_header('Accept-Language', 'en-US,en;q=0.9')
+        
         with urllib.request.urlopen(req, timeout=5) as response:
             with open(jpg_path, "wb") as f:
                 f.write(response.read())
         
-        # Convert to PNG using sips (macOS native command)
+        # Convert to GIF using sips
         import subprocess
-        subprocess.run(["sips", "-s", "format", "png", jpg_path, "--out", png_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sips", "-s", "format", "gif", jpg_path, "--out", gif_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         if os.path.exists(jpg_path):
             try:
@@ -83,30 +87,34 @@ def get_game_image(appid):
             except Exception:
                 pass
                 
-        if os.path.exists(png_path):
-            return png_path
+        if os.path.exists(gif_path):
+            return gif_path
     except Exception as e:
         print(f"Error downloading image for {appid}: {e}")
         
     return None
 
 def get_game_image_thumbnail(appid):
-    """Downloads game capsule from Steam CDN, resizes to 120x45 using sips, and returns the path to the PNG."""
+    """Downloads game capsule from Steam CDN, resizes to 120x45 in GIF format using sips, and returns the path."""
     cache_dir = os.path.join(DEFAULT_TEMP_DIR, "image_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
     except Exception:
         pass
         
-    png_path = os.path.join(cache_dir, f"{appid}_thumb.png")
-    if os.path.exists(png_path):
-        return png_path
+    gif_path = os.path.join(cache_dir, f"{appid}_thumb.gif")
+    if os.path.exists(gif_path):
+        return gif_path
         
     jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
     if not os.path.exists(jpg_path):
         url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
+            req.add_header('Accept-Language', 'en-US,en;q=0.9')
+            
             with urllib.request.urlopen(req, timeout=5) as response:
                 with open(jpg_path, "wb") as f:
                     f.write(response.read())
@@ -114,10 +122,10 @@ def get_game_image_thumbnail(appid):
             print(f"Error downloading image for thumb {appid}: {e}")
             return None
             
-    # Resize and convert to PNG using sips
+    # Resize and convert to GIF using sips
     import subprocess
-    subprocess.run(["sips", "-z", "45", "120", jpg_path, "--out", png_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return png_path if os.path.exists(png_path) else None
+    subprocess.run(["sips", "-s", "format", "gif", "-z", "45", "120", jpg_path, "--out", gif_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return gif_path if os.path.exists(gif_path) else None
 
 
 # Custom Styled Label Button (tk.Button has severe color limitations on macOS)
@@ -410,7 +418,7 @@ class LuaToolsHelperApp:
         logo_container.pack(fill=tk.X, pady=(20, 10))
         logo_container.pack_propagate(False)
         
-        logo_lbl = tk.Label(logo_container, text="🌙", font=("Helvetica", 22), fg=CAT_BLUE, bg=CAT_CRUST)
+        logo_lbl = tk.Label(logo_container, text="🔧", font=("Helvetica", 22), fg=CAT_BLUE, bg=CAT_CRUST)
         logo_lbl.pack(side=tk.LEFT, padx=(20, 5))
         
         title_lbl = tk.Label(logo_container, text="LuaTools Helper", font=("Helvetica", 13, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
@@ -454,9 +462,9 @@ class LuaToolsHelperApp:
             return
             
         def worker():
-            png_path = get_game_image(appid)
-            if png_path and os.path.exists(png_path):
-                self.root.after(0, lambda: self.create_and_cache_photoimage(appid, png_path, callback))
+            gif_path = get_game_image(appid)
+            if gif_path and os.path.exists(gif_path):
+                self.root.after(0, lambda: self.create_and_cache_photoimage(appid, gif_path, callback))
         threading.Thread(target=worker, daemon=True).start()
 
     def load_game_image_thumb_async(self, appid, callback):
@@ -466,14 +474,14 @@ class LuaToolsHelperApp:
             return
             
         def worker():
-            png_path = get_game_image_thumbnail(appid)
-            if png_path and os.path.exists(png_path):
-                self.root.after(0, lambda: self.create_and_cache_photoimage(cache_key, png_path, callback))
+            gif_path = get_game_image_thumbnail(appid)
+            if gif_path and os.path.exists(gif_path):
+                self.root.after(0, lambda: self.create_and_cache_photoimage(cache_key, gif_path, callback))
         threading.Thread(target=worker, daemon=True).start()
 
-    def create_and_cache_photoimage(self, cache_key, png_path, callback):
+    def create_and_cache_photoimage(self, cache_key, gif_path, callback):
         try:
-            img = tk.PhotoImage(file=png_path)
+            img = tk.PhotoImage(file=gif_path)
             TK_IMAGE_CACHE[cache_key] = img
             callback(img)
         except Exception as e:
@@ -823,7 +831,7 @@ class LuaToolsHelperApp:
             
             # Center: Title & App ID
             info_frame = tk.Frame(card, bg=CAT_BASE)
-            info_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, expand=True)
+            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=10)
             
             name_lbl = tk.Label(info_frame, text=game_name, font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_BASE, anchor="w")
             name_lbl.pack(anchor=tk.W, pady=(5, 0))
@@ -1023,16 +1031,23 @@ class LuaToolsHelperApp:
             url = api["url"]
             enabled = api.get("enabled", True)
             
+            # Check if API Key is required
+            is_key_required = ("<moapikey>" in url)
+            has_key = bool(self.morrenus_key.strip())
+            
             card = tk.Frame(scr.scrollable_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
             card.pack(fill=tk.X, pady=6, padx=5)
             
             # Left side checkbox
-            var = tk.BooleanVar(value=enabled)
+            var = tk.BooleanVar(value=enabled if not (is_key_required and not has_key) else False)
+            cb_state = "disabled" if (is_key_required and not has_key) else "normal"
+            
             cb = tk.Checkbutton(
                 card, 
                 text="", 
                 variable=var, 
                 command=lambda i=idx, v=var: self.toggle_api(i, v.get()),
+                state=cb_state,
                 bg=CAT_MANTLE, 
                 activebackground=CAT_MANTLE, 
                 selectcolor=CAT_BASE,
@@ -1041,14 +1056,27 @@ class LuaToolsHelperApp:
             )
             cb.pack(side=tk.LEFT, padx=15, pady=15)
             
-            # Center title and url
+            # Center title and url (Perfect Left Alignment)
             info = tk.Frame(card, bg=CAT_MANTLE)
-            info.pack(side=tk.LEFT, fill=tk.Y, padx=5, expand=True)
+            info.pack(side=tk.LEFT, fill=tk.BOTH, padx=15)
             
-            lbl_name = tk.Label(info, text=name, font=("Helvetica", 12, "bold"), fg=CAT_TEXT, bg=CAT_MANTLE, anchor="w")
+            title_text = name
+            title_color = CAT_TEXT
+            if is_key_required and not has_key:
+                title_text += "  ⚠️ (API Key Required - Check Settings)"
+                title_color = CAT_YELLOW
+                
+            lbl_name = tk.Label(info, text=title_text, font=("Helvetica", 12, "bold"), fg=title_color, bg=CAT_MANTLE, anchor="w")
             lbl_name.pack(anchor=tk.W, pady=(5, 0))
             
-            lbl_url = tk.Label(info, text=url, font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_MANTLE, anchor="w")
+            # Display masked/cleared URL
+            display_url = url
+            if has_key:
+                display_url = url.replace("<moapikey>", self.morrenus_key[:4] + "..." + self.morrenus_key[-4:] if len(self.morrenus_key) > 8 else "****")
+            else:
+                display_url = url.replace("<moapikey>", "MISSING_API_KEY")
+                
+            lbl_url = tk.Label(info, text=display_url, font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_MANTLE, anchor="w")
             lbl_url.pack(anchor=tk.W, pady=(0, 5))
 
     def toggle_api(self, index, val):
@@ -1542,7 +1570,9 @@ class LuaToolsHelperApp:
         try:
             url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0')
+            req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            req.add_header('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8')
+            req.add_header('Accept-Language', 'en-US,en;q=0.9')
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 if str(appid) in data and data[str(appid)].get('success'):
