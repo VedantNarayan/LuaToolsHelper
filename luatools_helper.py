@@ -771,8 +771,10 @@ class LuaToolsHelperApp:
             self.game_card_img.configure(image="")
 
     def manual_refresh_dashboard(self):
-        # Force check all historical lines from the beginning of log file
-        self.cef_log_position = 0
+        # Clear log cache to force sync with history database
+        self.last_detected_store_appid = 0
+        self.last_detected_store_name = ""
+        
         self.check_cef_logs()
         self.check_history_db()
         
@@ -782,7 +784,7 @@ class LuaToolsHelperApp:
             self.scanned_dropdown.update_options(detected_options)
             self.scanned_dropdown.set(detected_options[0])
             self.on_dropdown_game_selected(detected_options[0])
-        messagebox.showinfo("Refreshed", "Steam activity log and store history fully scanned successfully!")
+        messagebox.showinfo("Refreshed", "Steam activity log and store history scanned successfully!")
 
     def bind_scroll_recursive(self, widget, handler):
         widget.bind("<MouseWheel>", handler)
