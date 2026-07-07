@@ -69,6 +69,35 @@ def get_game_image(appid):
         
     return None
 
+def get_game_image_thumbnail(appid):
+    """Downloads game capsule from Steam CDN, resizes to 120x45 using sips, and returns the path to the PNG."""
+    cache_dir = os.path.join(DEFAULT_TEMP_DIR, "image_cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception:
+        pass
+        
+    png_path = os.path.join(cache_dir, f"{appid}_thumb.png")
+    if os.path.exists(png_path):
+        return png_path
+        
+    jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
+    if not os.path.exists(jpg_path):
+        url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                with open(jpg_path, "wb") as f:
+                    f.write(response.read())
+        except Exception as e:
+            print(f"Error downloading image for thumb {appid}: {e}")
+            return None
+            
+    # Resize and convert to PNG using sips
+    import subprocess
+    subprocess.run(["sips", "-z", "45", "120", jpg_path, "--out", png_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return png_path if os.path.exists(png_path) else None
+
 # State Constants
 STATE_DETECT = 0
 STATE_DOWNLOAD = 1
@@ -283,7 +312,7 @@ class LuaToolsHelperApp:
     def __init__(self, root):
         self.root = root
         self.root.title("LuaTools macOS Helper")
-        self.root.geometry("550x320")
+        self.root.geometry("800x350")
         self.root.configure(bg=CAT_BASE)
         self.root.resizable(False, False)
         
@@ -347,13 +376,25 @@ class LuaToolsHelperApp:
                 self.root.after(0, lambda: self.create_and_cache_photoimage(appid, png_path, callback))
         threading.Thread(target=worker, daemon=True).start()
 
-    def create_and_cache_photoimage(self, appid, png_path, callback):
+    def load_game_image_thumb_async(self, appid, callback):
+        cache_key = f"{appid}_thumb"
+        if cache_key in TK_IMAGE_CACHE:
+            callback(TK_IMAGE_CACHE[cache_key])
+            return
+            
+        def worker():
+            png_path = get_game_image_thumbnail(appid)
+            if png_path and os.path.exists(png_path):
+                self.root.after(0, lambda: self.create_and_cache_photoimage(cache_key, png_path, callback))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def create_and_cache_photoimage(self, cache_key, png_path, callback):
         try:
             img = tk.PhotoImage(file=png_path)
-            TK_IMAGE_CACHE[appid] = img
+            TK_IMAGE_CACHE[cache_key] = img
             callback(img)
         except Exception as e:
-            print(f"Error creating PhotoImage for {appid}: {e}")
+            print(f"Error creating PhotoImage for {cache_key}: {e}")
 
     # ── SETTINGS & DATA LOADERS ──
     def load_settings(self):
@@ -453,19 +494,19 @@ class LuaToolsHelperApp:
         self.clear_container()
         
         if new_state == STATE_DETECT:
-            self.root.geometry("550x330")
+            self.root.geometry("800x380")
             self.render_detect_screen()
         elif new_state == STATE_DOWNLOAD:
-            self.root.geometry("550x350")
+            self.root.geometry("800x380")
             self.render_download_screen()
         elif new_state == STATE_SUCCESS:
-            self.root.geometry("550x260")
+            self.root.geometry("800x300")
             self.render_success_screen()
         elif new_state == STATE_RESTART:
-            self.root.geometry("550x240")
+            self.root.geometry("800x280")
             self.render_restart_screen()
         elif new_state == STATE_MANAGE:
-            self.root.geometry("680x520")
+            self.root.geometry("800x520")
             self.render_manage_screen()
 
     # ── STATE 0: DETECT SCREEN ──
@@ -599,8 +640,8 @@ class LuaToolsHelperApp:
         manage_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
         manage_frame.pack(fill=tk.BOTH, expand=True)
         
-        manage_frame.columnconfigure(0, weight=3)
-        manage_frame.columnconfigure(1, weight=2)
+        manage_frame.columnconfigure(0, weight=1)
+        manage_frame.columnconfigure(1, weight=1)
         
         # LEFT COLUMN: Manual Entry & Settings
         left_sub = tk.Frame(manage_frame, bg=CAT_BASE)
@@ -1028,29 +1069,55 @@ class LuaToolsHelperApp:
             
         self.patches_map = {}
         
+        # Dictionary of appid_str -> {"status": ..., "has_lua": bool}
+        patches_data = {}
+        
+        # 1. Scan config/stplug-in for lua files
         st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
-        if not os.path.exists(st_plug_dir):
-            empty_lbl = tk.Label(self.scroll_frame.scrollable_frame, text="No patches installed.", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
-            empty_lbl.pack(pady=20)
-            return
+        if os.path.exists(st_plug_dir):
+            try:
+                for file in os.listdir(st_plug_dir):
+                    if file.endswith(".lua"):
+                        appid_str = file.replace(".lua", "")
+                        patches_data[appid_str] = {"status": "Active", "has_lua": True}
+                    elif file.endswith(".lua.disabled"):
+                        appid_str = file.replace(".lua.disabled", "")
+                        patches_data[appid_str] = {"status": "Disabled", "has_lua": True}
+            except Exception as e:
+                print(f"Error scanning stplug-in: {e}")
+                
+        # 2. Scan depotcache for manifest files to include manifest-only fixes
+        depot_cache = os.path.join(self.steam_path, "depotcache")
+        if os.path.exists(depot_cache):
+            try:
+                for file in os.listdir(depot_cache):
+                    if file.endswith(".manifest"):
+                        parts = file.split("_")
+                        if parts:
+                            appid_str = parts[0]
+                            if appid_str.isdigit():
+                                if appid_str not in patches_data:
+                                    patches_data[appid_str] = {"status": "Active (Manifest)", "has_lua": False}
+                    elif file.endswith(".manifest.disabled"):
+                        parts = file.split("_")
+                        if parts:
+                            appid_str = parts[0]
+                            if appid_str.isdigit():
+                                if appid_str not in patches_data:
+                                    patches_data[appid_str] = {"status": "Disabled (Manifest)", "has_lua": False}
+            except Exception as e:
+                print(f"Error scanning depotcache: {e}")
 
-        patches = []
-        for file in os.listdir(st_plug_dir):
-            if file.endswith(".lua"):
-                appid = file.replace(".lua", "")
-                patches.append((appid, "Active"))
-            elif file.endswith(".lua.disabled"):
-                appid = file.replace(".lua.disabled", "")
-                patches.append((appid, "Disabled"))
-
-        if not patches:
+        if not patches_data:
             empty_lbl = tk.Label(self.scroll_frame.scrollable_frame, text="No patches installed.", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
             empty_lbl.pack(pady=20)
             return
 
         idx = 0
-        for appid_str, status in sorted(patches):
+        for appid_str in sorted(patches_data.keys(), key=lambda x: int(x) if x.isdigit() else 999999):
             appid = int(appid_str)
+            item = patches_data[appid_str]
+            status = item["status"]
             game_name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
             
             # Custom Card Container
@@ -1058,11 +1125,12 @@ class LuaToolsHelperApp:
             card.pack(fill=tk.X, pady=4, padx=5)
             
             # Left: Game Capsule Image (120x45)
-            img_lbl = tk.Label(card, bg=CAT_BASE)
+            img_lbl = tk.Label(card, bg=CAT_BASE, width=120, height=45)
             img_lbl.pack(side=tk.LEFT, padx=8, pady=5)
+            img_lbl.pack_propagate(False)
             
-            # Load the image asynchronously
-            self.load_game_image_async(appid, lambda img, l=img_lbl: l.configure(image=img) if l.winfo_exists() else None)
+            # Load the thumbnail image asynchronously (using 120x45 size)
+            self.load_game_image_thumb_async(appid, lambda img, l=img_lbl: l.configure(image=img) if l.winfo_exists() else None)
             
             # Center: Title & App ID
             info_frame = tk.Frame(card, bg=CAT_BASE)
@@ -1071,8 +1139,12 @@ class LuaToolsHelperApp:
             name_lbl = tk.Label(info_frame, text=game_name, font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_BASE, anchor="w")
             name_lbl.pack(anchor=tk.W, pady=(5, 0))
             
-            status_indicator = "🟢 Active" if status == "Active" else "⚪ Disabled"
-            status_color = CAT_GREEN if status == "Active" else CAT_SUBTEXT0
+            is_active = status.startswith("Active")
+            status_indicator = "🟢 Active" if is_active else "⚪ Disabled"
+            if "Manifest" in status:
+                status_indicator += " (Manifest)"
+                
+            status_color = CAT_GREEN if is_active else CAT_SUBTEXT0
             sub_lbl = tk.Label(info_frame, text=f"App ID: {appid} | {status_indicator}", font=("Helvetica", 9), fg=status_color, bg=CAT_BASE, anchor="w")
             sub_lbl.pack(anchor=tk.W, pady=(0, 5))
             
@@ -1095,45 +1167,74 @@ class LuaToolsHelperApp:
             if game_name.startswith("Game "):
                 self.resolve_game_name(appid)
 
-    def toggle_patch_direct(self, appid, status):
+    def toggle_patch_direct(self, appid_str, status):
         st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
-        if status == "Active":
-            src = os.path.join(st_plug_dir, f"{appid}.lua")
-            dst = os.path.join(st_plug_dir, f"{appid}.lua.disabled")
-        else:
-            src = os.path.join(st_plug_dir, f"{appid}.lua.disabled")
-            dst = os.path.join(st_plug_dir, f"{appid}.lua")
+        depot_cache = os.path.join(self.steam_path, "depotcache")
+        
+        # 1. Toggle Lua script if it exists
+        lua_active = os.path.join(st_plug_dir, f"{appid_str}.lua")
+        lua_disabled = os.path.join(st_plug_dir, f"{appid_str}.lua.disabled")
+        
+        has_lua = os.path.exists(lua_active) or os.path.exists(lua_disabled)
+        if has_lua:
+            try:
+                if status.startswith("Active"):
+                    if os.path.exists(lua_active):
+                        os.rename(lua_active, lua_disabled)
+                else:
+                    if os.path.exists(lua_disabled):
+                        os.rename(lua_disabled, lua_active)
+            except Exception as e:
+                print(f"Error toggling lua patch: {e}")
+                
+        # 2. Toggle Manifest files in depotcache
+        if os.path.exists(depot_cache):
+            try:
+                for file in os.listdir(depot_cache):
+                    parts = file.split("_")
+                    if parts and parts[0] == appid_str:
+                        if status.startswith("Active"):
+                            if file.endswith(".manifest"):
+                                os.rename(os.path.join(depot_cache, file), os.path.join(depot_cache, f"{file}.disabled"))
+                        else:
+                            if file.endswith(".manifest.disabled"):
+                                clean_name = file.replace(".manifest.disabled", ".manifest")
+                                os.rename(os.path.join(depot_cache, file), os.path.join(depot_cache, clean_name))
+            except Exception as e:
+                print(f"Error toggling manifest files: {e}")
+                
+        self.refresh_installed_list()
 
-        try:
-            if os.path.exists(src):
-                os.rename(src, dst)
-                self.refresh_installed_list()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to toggle patch: {e}")
-
-    def delete_patch_direct(self, appid, status):
-        confirm = messagebox.askyesno("Confirm", f"Are you sure you want to remove the unlock fix for App ID {appid}?")
+    def delete_patch_direct(self, appid_str, status):
+        confirm = messagebox.askyesno("Confirm", f"Are you sure you want to remove all files and manifests for App ID {appid_str}?")
         if not confirm:
             return
 
         st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
-        ext = ".lua" if status == "Active" else ".lua.disabled"
-        lua_path = os.path.join(st_plug_dir, f"{appid}{ext}")
-
-        try:
-            if os.path.exists(lua_path):
-                os.remove(lua_path)
-            
-            depot_cache = os.path.join(self.steam_path, "depotcache")
-            if os.path.exists(depot_cache):
+        depot_cache = os.path.join(self.steam_path, "depotcache")
+        
+        # Delete Lua script files
+        for ext in [".lua", ".lua.disabled"]:
+            lua_path = os.path.join(st_plug_dir, f"{appid_str}{ext}")
+            try:
+                if os.path.exists(lua_path):
+                    os.remove(lua_path)
+            except Exception:
+                pass
+                
+        # Delete manifest files
+        if os.path.exists(depot_cache):
+            try:
                 for file in os.listdir(depot_cache):
-                    if file.startswith(f"{appid}_") and file.endswith(".manifest"):
-                        os.remove(os.path.join(depot_cache, file))
-            
-            self.refresh_installed_list()
-            messagebox.showinfo("Deleted", f"Successfully removed App ID {appid} patch and its manifests.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete patch: {e}")
+                    parts = file.split("_")
+                    if parts and parts[0] == appid_str:
+                        if file.endswith(".manifest") or file.endswith(".manifest.disabled"):
+                            os.remove(os.path.join(depot_cache, file))
+            except Exception:
+                pass
+                
+        self.refresh_installed_list()
+        messagebox.showinfo("Deleted", f"Successfully removed App ID {appid_str} patch files.")
 
     def resolve_game_name(self, appid):
         if appid in self.installed_games or appid in self.game_name_cache:
