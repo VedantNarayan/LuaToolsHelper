@@ -490,28 +490,45 @@ class ScrollableFrame(tk.Frame):
         """Route mousewheel to the visible ScrollableFrame under the mouse."""
         import math
         try:
-            # Find which ScrollableFrame (if any) contains the mouse pointer
             widget = event.widget
-            # Walk up from the event widget to find a ScrollableFrame ancestor
+            if not widget:
+                return
+            
+            root = widget.winfo_toplevel()
             target = None
             w = widget
+            
+            # Walk up to find the ScrollableFrame ancestor using robust nametowidget
             while w is not None:
-                if isinstance(w, ScrollableFrame):
+                # If w is a string path, resolve to widget object
+                if isinstance(w, str):
+                    try:
+                        w = root.nametowidget(w)
+                    except Exception:
+                        break
+                
+                # Check class name string to bypass namespace issues
+                if w.__class__.__name__ == 'ScrollableFrame':
                     target = w
                     break
-                w = w.master
+                
+                # Get parent widget path safely
+                try:
+                    parent_path = w.winfo_parent()
+                    if parent_path and parent_path != str(w):
+                        w = parent_path # Will be resolved on next iteration
+                    else:
+                        break
+                except Exception:
+                    break
             
-            # If not found by ancestry, check all instances for visibility
+            # If not found by ancestry, fall back to the currently visible ScrollableFrame
             if target is None:
                 for sf in ScrollableFrame._active_instances:
                     try:
-                        if sf.winfo_ismapped() and sf.winfo_viewable():
-                            # Check if mouse is within this frame's bounds
-                            x, y = sf.winfo_rootx(), sf.winfo_rooty()
-                            w2, h = sf.winfo_width(), sf.winfo_height()
-                            if x <= event.x_root <= x + w2 and y <= event.y_root <= y + h:
-                                target = sf
-                                break
+                        if sf.winfo_exists() and sf.winfo_viewable():
+                            target = sf
+                            break
                     except Exception:
                         continue
             
@@ -521,6 +538,7 @@ class ScrollableFrame(tk.Frame):
             delta = event.delta
             if sys.platform == 'darwin':
                 if delta != 0:
+                    # Scroll speed multiplier: 3.0 units per tick
                     amount = -int(math.copysign(max(1, abs(delta * 3.0)), delta))
                     target.canvas.yview_scroll(amount, 'units')
             else:
