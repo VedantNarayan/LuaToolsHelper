@@ -771,19 +771,17 @@ class LuaToolsHelperApp:
             self.game_card_img.configure(image="")
 
     def manual_refresh_dashboard(self):
-        # Clear log cache to force sync with history database
+        # Force clear all cached timestamps to trigger a true hard sync
+        self.last_user_reg_mtime = 0
         self.last_detected_store_appid = 0
         self.last_detected_store_name = ""
+        self.last_auto_selected_appid = 0
         
         self.check_cef_logs()
         self.check_history_db()
         
-        # Rescan steam activity options and keep dropdown synced
-        detected_options = self.get_scanned_dropdown_options()
-        if hasattr(self, 'scanned_dropdown'):
-            self.scanned_dropdown.update_options(detected_options)
-            self.scanned_dropdown.set(detected_options[0])
-            self.on_dropdown_game_selected(detected_options[0])
+        # Explicitly force UI rebuild and dropdown sync
+        self.refresh_lists_and_dropdown()
         messagebox.showinfo("Refreshed", "Steam activity log and store history scanned successfully!")
 
     def bind_scroll_recursive(self, widget, handler):
@@ -1643,9 +1641,12 @@ class LuaToolsHelperApp:
         if not os.path.exists(history_path):
             return
         
+        temp_copy = os.path.join(DEFAULT_TEMP_DIR, "History_check_temp")
         try:
-            # Query the database directly to bypass filesystem modtime caching/delays
-            conn = sqlite3.connect(f"file:{history_path}?immutable=1", uri=True)
+            # Copy to temp file to bypass filesystem caching and lock delays
+            import shutil
+            shutil.copy2(history_path, temp_copy)
+            conn = sqlite3.connect(temp_copy)
             cursor = conn.cursor()
             cursor.execute("SELECT MAX(last_visit_time) FROM urls WHERE url LIKE '%store.steampowered.com/app/%'")
             row = cursor.fetchone()
@@ -1658,6 +1659,12 @@ class LuaToolsHelperApp:
                     self.root.after(0, self.refresh_lists_and_dropdown)
         except Exception:
             pass
+        finally:
+            if os.path.exists(temp_copy):
+                try:
+                    os.remove(temp_copy)
+                except Exception:
+                    pass
 
     def handle_new_store_game_detected(self, appid, name):
         self.set_selected_game(appid, name)
@@ -1690,8 +1697,12 @@ class LuaToolsHelperApp:
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
         history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
         if os.path.exists(history_path):
+            temp_copy = os.path.join(DEFAULT_TEMP_DIR, "History_scan_temp")
             try:
-                conn = sqlite3.connect(f"file:{history_path}?immutable=1", uri=True)
+                # Copy to temp file to bypass filesystem caching and lock delays
+                import shutil
+                shutil.copy2(history_path, temp_copy)
+                conn = sqlite3.connect(temp_copy)
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT url, title FROM urls "
@@ -1719,6 +1730,12 @@ class LuaToolsHelperApp:
                 conn.close()
             except Exception as e:
                 print(f"Error checking History in monitor loop: {e}")
+            finally:
+                if os.path.exists(temp_copy):
+                    try:
+                        os.remove(temp_copy)
+                    except Exception:
+                        pass
 
         # Scan installed directory as fallback
         for appid, name in self.installed_games.items():
