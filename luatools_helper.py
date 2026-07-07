@@ -393,9 +393,11 @@ class LuaToolsHelperApp:
         self.cef_log_position = 0
         self.js_log_position = 0
         
-        # Dynamic tailing of CEF logs to ignore old sessions
+        # Dynamic tailing of CEF logs to ignore old sessions (supports cef_log.txt and cef.log)
         try:
-            log_path = os.path.join(self.steam_path, "logs/cef.log")
+            log_path = os.path.join(self.steam_path, "logs/cef_log.txt")
+            if not os.path.exists(log_path):
+                log_path = os.path.join(self.steam_path, "logs/cef.log")
             if os.path.exists(log_path):
                 self.cef_log_position = os.path.getsize(log_path)
         except Exception:
@@ -1525,14 +1527,17 @@ class LuaToolsHelperApp:
     def steam_monitor_loop(self):
         while self.running:
             try:
-                time.sleep(3.0)
+                time.sleep(0.5) # Fast 0.5s real-time scanning
                 self.check_cef_logs()
                 self.check_history_db()
             except Exception as e:
                 print(f"Error in monitor thread: {e}")
 
     def check_cef_logs(self):
-        log_path = os.path.join(self.steam_path, "logs/cef.log")
+        # Support both 'cef_log.txt' and 'cef.log' formats
+        log_path = os.path.join(self.steam_path, "logs/cef_log.txt")
+        if not os.path.exists(log_path):
+            log_path = os.path.join(self.steam_path, "logs/cef.log")
         if not os.path.exists(log_path):
             return
         try:
@@ -1563,11 +1568,16 @@ class LuaToolsHelperApp:
     def check_history_db(self):
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
         history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
+        history_journal = history_path + "-journal"
         if not os.path.exists(history_path):
             return
         
         try:
+            # Check modification time of both history db and its rollback journal to capture updates instantly
             mtime = os.path.getmtime(history_path)
+            if os.path.exists(history_journal):
+                mtime = max(mtime, os.path.getmtime(history_journal))
+                
             if mtime <= self.last_user_reg_mtime:
                 return
             self.last_user_reg_mtime = mtime
