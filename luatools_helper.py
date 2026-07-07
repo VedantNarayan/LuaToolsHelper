@@ -382,6 +382,7 @@ class LuaToolsHelperApp:
         self.game_name_to_appid = {} # name -> appid
         self.game_name_cache = {} # appid -> name
         self.name_labels = {} # appid -> label reference to update names without flickering
+        self.last_auto_selected_appid = 0
         
         # Scanner states
         self.active_running_appid = 0
@@ -698,6 +699,12 @@ class LuaToolsHelperApp:
         self.btn_add.configure_state("disabled")
         
         # Initialize selection
+        latest_appid = 0
+        match = re.search(r'App ID: (\d+)', detected_options[0])
+        if match:
+            latest_appid = int(match.group(1))
+        self.last_auto_selected_appid = latest_appid
+        
         self.on_dropdown_game_selected(detected_options[0])
 
     def set_selected_game(self, appid, name):
@@ -1699,30 +1706,44 @@ class LuaToolsHelperApp:
 
     def refresh_lists_and_dropdown(self):
         if self.current_tab == "dashboard":
-            # Save currently selected App ID
-            current_opt = self.scanned_dropdown.get()
-            current_appid = 0
-            match = re.search(r'App ID: (\d+)', current_opt)
-            if match:
-                current_appid = int(match.group(1))
-                
             opts = self.get_scanned_dropdown_options()
+            if not opts:
+                return
+                
             self.scanned_dropdown.update_options(opts)
             
-            # Find the option matching the saved App ID
-            matching_opt = None
-            for opt in opts:
-                if f"App ID: {current_appid}" in opt:
-                    matching_opt = opt
-                    break
-                    
-            if matching_opt:
-                self.scanned_dropdown.set(matching_opt)
-                # Keep active card details in sync
-                self.on_dropdown_game_selected(matching_opt)
+            # Parse the App ID of the latest detected activity (first option)
+            latest_opt = opts[0]
+            latest_appid = 0
+            match = re.search(r'App ID: (\d+)', latest_opt)
+            if match:
+                latest_appid = int(match.group(1))
+                
+            # If we detected a new game page, auto-select and display it
+            if latest_appid > 0 and latest_appid != self.last_auto_selected_appid:
+                self.last_auto_selected_appid = latest_appid
+                self.scanned_dropdown.set(latest_opt)
+                self.on_dropdown_game_selected(latest_opt)
             else:
-                self.scanned_dropdown.set(opts[0])
-                self.on_dropdown_game_selected(opts[0])
+                # Keep the user's current selection
+                current_opt = self.scanned_dropdown.get()
+                current_appid = 0
+                match_curr = re.search(r'App ID: (\d+)', current_opt)
+                if match_curr:
+                    current_appid = int(match_curr.group(1))
+                    
+                matching_opt = None
+                for opt in opts:
+                    if f"App ID: {current_appid}" in opt:
+                        matching_opt = opt
+                        break
+                        
+                if matching_opt:
+                    self.scanned_dropdown.set(matching_opt)
+                    self.on_dropdown_game_selected(matching_opt)
+                else:
+                    self.scanned_dropdown.set(opts[0])
+                    self.on_dropdown_game_selected(opts[0])
 
 
 if __name__ == "__main__":
