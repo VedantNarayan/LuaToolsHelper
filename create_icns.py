@@ -1,9 +1,9 @@
 import os
 import subprocess
 
-image_path = "/Users/Vedant/.gemini/antigravity/brain/e37f62cf-42ba-4d9f-ad4d-ba98ae1c0eac/ds4link_icon_1783451459866.jpg"
+image_path = "/Users/Vedant/.gemini/antigravity/brain/e37f62cf-42ba-4d9f-ad4d-ba98ae1c0eac/luatools_new_icon_1783453139184.jpg"
 iconset_path = "AppIcon.iconset"
-output_icns = "AppIcon.icns"
+output_icns = "icon-windowed.icns"
 
 # Create iconset folder
 os.makedirs(iconset_path, exist_ok=True)
