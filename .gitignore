@@ -1,0 +1,13 @@
+# Compiled Output
+*.dmg
+dist/
+build/
+venv_build/
+*.exe
+
+# Temporary files & logs
+*.log
+luatools_temp/
+
+# System files
+.DS_Store
