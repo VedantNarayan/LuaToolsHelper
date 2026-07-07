@@ -66,18 +66,23 @@ def get_game_image(appid):
         return gif_path
         
     jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
-    url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
+    if not os.path.exists(jpg_path):
+        url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
+            req.add_header('Accept-Language', 'en-US,en;q=0.9')
+            
+            with urllib.request.urlopen(req, timeout=5) as response:
+                with open(jpg_path, "wb") as f:
+                    f.write(response.read())
+        except Exception as e:
+            print(f"Error downloading image for {appid}: {e}")
+            return None
+            
+    # Convert to GIF using sips
     try:
-        req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
-        req.add_header('Accept-Language', 'en-US,en;q=0.9')
-        
-        with urllib.request.urlopen(req, timeout=5) as response:
-            with open(jpg_path, "wb") as f:
-                f.write(response.read())
-        
-        # Convert to GIF using sips
         import subprocess
         subprocess.run(["sips", "-s", "format", "gif", jpg_path, "--out", gif_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
@@ -87,12 +92,10 @@ def get_game_image(appid):
             except Exception:
                 pass
                 
-        if os.path.exists(gif_path):
-            return gif_path
+        return gif_path if os.path.exists(gif_path) else None
     except Exception as e:
-        print(f"Error downloading image for {appid}: {e}")
-        
-    return None
+        print(f"Error converting to GIF for {appid}: {e}")
+        return None
 
 def get_game_image_thumbnail(appid):
     """Downloads game capsule from Steam CDN, resizes to 120x45 in GIF format using sips, and returns the path."""
@@ -304,32 +307,8 @@ class ScrollableFrame(tk.Frame):
         
         self.canvas.bind('<Configure>', self._on_canvas_configure)
         
-        # Local bind on mouse entry/leave to prevent conflicts and flickering
-        self.canvas.bind('<Enter>', self._bind_mousewheel)
-        self.canvas.bind('<Leave>', self._unbind_mousewheel)
-        
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
-        
-    def _bind_mousewheel(self, event):
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
-        
-    def _unbind_mousewheel(self, event):
-        self.canvas.unbind_all("<MouseWheel>")
-        self.canvas.unbind_all("<Button-4>")
-        self.canvas.unbind_all("<Button-5>")
-        
-    def _on_mousewheel(self, event):
-        try:
-            if sys.platform == "darwin":
-                # Scroll speed multiplier on macOS (event.delta is typically +/- 1 or small fractional values on macOS)
-                self.canvas.yview_scroll(int(-3 * event.delta), "units")
-            else:
-                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        except Exception:
-            pass
 
 
 # Sidebar Button for Modern UI layout
@@ -414,6 +393,14 @@ class LuaToolsHelperApp:
         self.cef_log_position = 0
         self.js_log_position = 0
         
+        # Dynamic tailing of CEF logs to ignore old sessions
+        try:
+            log_path = os.path.join(self.steam_path, "logs/cef.log")
+            if os.path.exists(log_path):
+                self.cef_log_position = os.path.getsize(log_path)
+        except Exception:
+            self.cef_log_position = 0
+            
         # Animation & Flow state
         self.running = True
         self.pulse_phase = False
@@ -425,6 +412,11 @@ class LuaToolsHelperApp:
         self.load_settings()
         self.load_apis()
         self.scan_installed_games()
+        
+        # Global scroll wheel bindings for smooth scrolling on macOS
+        self.root.bind_all("<MouseWheel>", self._on_global_mousewheel)
+        self.root.bind_all("<Button-4>", self._on_global_mousewheel)
+        self.root.bind_all("<Button-5>", self._on_global_mousewheel)
         
         # ── SIDEBAR NAVIGATION PANEL ──
         self.sidebar_frame = tk.Frame(self.root, bg=CAT_CRUST, width=200)
@@ -642,8 +634,15 @@ class LuaToolsHelperApp:
         self.status_lbl.pack(side=tk.LEFT)
 
         # Scanned Cart & Store Dropdown section
-        scanned_lbl = tk.Label(self.content_frame, text="Recently Viewed & Cart Games:", font=("Helvetica", 11, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        scanned_lbl.pack(anchor=tk.W, pady=(5, 3))
+        scanned_header = tk.Frame(self.content_frame, bg=CAT_BASE)
+        scanned_header.pack(fill=tk.X, pady=(5, 3))
+        
+        scanned_lbl = tk.Label(scanned_header, text="Recently Viewed & Cart Games:", font=("Helvetica", 11, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
+        scanned_lbl.pack(side=tk.LEFT)
+        
+        # Manual refresh button for activity
+        btn_refresh_act = LabelButton(scanned_header, text="🔄 Refresh", command=self.manual_refresh_dashboard, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 9, "bold"), pady=2, padx=8, outlined=True)
+        btn_refresh_act.pack(side=tk.RIGHT)
         
         detected_options = self.get_scanned_dropdown_options()
         self.scanned_dropdown = TkDropdown(self.content_frame, detected_options, self.on_dropdown_game_selected)
@@ -711,10 +710,66 @@ class LuaToolsHelperApp:
             self.btn_add.configure_state("disabled")
             self.game_card_img.configure(image="")
 
+    def manual_refresh_dashboard(self):
+        # Force check log files and history db
+        self.check_cef_logs()
+        self.check_history_db()
+        
+        # Rescan steam activity options
+        detected_options = self.get_scanned_dropdown_options()
+        if hasattr(self, 'scanned_dropdown'):
+            self.scanned_dropdown.update_options(detected_options)
+            self.scanned_dropdown.set(detected_options[0])
+            self.on_dropdown_game_selected(detected_options[0])
+        messagebox.showinfo("Refreshed", "Steam activity log and store history scanned successfully!")
+
+    def _on_global_mousewheel(self, event):
+        try:
+            # Find the widget under the mouse cursor
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+            if not widget:
+                return
+                
+            # Traverse parent tree to find target canvas
+            curr = widget
+            canvas = None
+            while curr:
+                if isinstance(curr, tk.Canvas):
+                    canvas = curr
+                    break
+                parent = curr.winfo_parent()
+                if not parent:
+                    break
+                try:
+                    curr = self.root.nametowidget(parent)
+                except Exception:
+                    break
+                    
+            if canvas:
+                if sys.platform == "darwin":
+                    # Fast responsive scroll multiplier for macOS
+                    canvas.yview_scroll(int(-3 * event.delta), "units")
+                else:
+                    if event.num == 4:
+                        canvas.yview_scroll(-1, "units")
+                    elif event.num == 5:
+                        canvas.yview_scroll(1, "units")
+                    else:
+                        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
     # ── TAB 2: MANAGE PATCHES VIEW ──
     def render_patches(self):
-        title_lbl = tk.Label(self.content_frame, text="Manage Installed Patches", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
-        title_lbl.pack(anchor=tk.W, pady=(0, 10))
+        title_frame = tk.Frame(self.content_frame, bg=CAT_BASE)
+        title_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        title_lbl = tk.Label(title_frame, text="Manage Installed Patches", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
+        title_lbl.pack(side=tk.LEFT)
+        
+        # Manual refresh button
+        btn_refresh = LabelButton(title_frame, text="🔄 Refresh", command=self.refresh_installed_list, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 9, "bold"), pady=4, padx=8, outlined=True)
+        btn_refresh.pack(side=tk.RIGHT)
         
         list_container = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
         list_container.pack(fill=tk.BOTH, expand=True, pady=5)
