@@ -29,6 +29,27 @@ CAT_BTN_CONFIRM = "#58a6ff"  # Confirm button bright fill
 CAT_BTN_OUTLINE = "#30363d"  # Button outline/border color
 CAT_CARD_BORDER = "#30363d"  # Card row border color
 
+# Default Paths on Mac_EXT
+MAC_EXT_ROOT = "/Volumes/Mac_EXT"
+DEFAULT_STEAM_PATH = os.path.join(MAC_EXT_ROOT, "CrossOverData/CrossOver/Bottles/Steam/drive_c/Program Files (x86)/Steam")
+DEFAULT_TEMP_DIR = os.path.join(MAC_EXT_ROOT, "Steam break/luatools_temp")
+DEFAULT_SETTINGS_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/data/settings.json")
+DEFAULT_API_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/api.json")
+
+FALLBACK_APIS = [
+    {"name": "Morrenus", "url": "https://hubcapmanifest.com/api/v1/manifest/<appid>?api_key=<moapikey>", "success_code": 200, "enabled": True},
+    {"name": "Ryuu", "url": "http://167.235.229.108/<appid>", "success_code": 200, "enabled": True},
+    {"name": "TwentyTwo Cloud", "url": "https://api.twentytwocloud.com/download?appid=<appid>", "success_code": 200, "enabled": True},
+    {"name": "Sushi", "url": "https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/<appid>.zip", "success_code": 200, "enabled": True}
+]
+
+# State Constants
+STATE_DETECT = 0
+STATE_DOWNLOAD = 1
+STATE_SUCCESS = 2
+STATE_RESTART = 3
+STATE_MANAGE = 4
+
 # Globally cached images (to prevent garbage collection in Tkinter!)
 TK_IMAGE_CACHE = {}
 
@@ -98,26 +119,6 @@ def get_game_image_thumbnail(appid):
     subprocess.run(["sips", "-z", "45", "120", jpg_path, "--out", png_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return png_path if os.path.exists(png_path) else None
 
-# State Constants
-STATE_DETECT = 0
-STATE_DOWNLOAD = 1
-STATE_SUCCESS = 2
-STATE_RESTART = 3
-STATE_MANAGE = 4
-
-# Default Paths on Mac_EXT
-MAC_EXT_ROOT = "/Volumes/Mac_EXT"
-DEFAULT_STEAM_PATH = os.path.join(MAC_EXT_ROOT, "CrossOverData/CrossOver/Bottles/Steam/drive_c/Program Files (x86)/Steam")
-DEFAULT_TEMP_DIR = os.path.join(MAC_EXT_ROOT, "Steam break/luatools_temp")
-DEFAULT_SETTINGS_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/data/settings.json")
-DEFAULT_API_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/api.json")
-
-FALLBACK_APIS = [
-    {"name": "Morrenus", "url": "https://hubcapmanifest.com/api/v1/manifest/<appid>?api_key=<moapikey>", "success_code": 200, "enabled": True},
-    {"name": "Ryuu", "url": "http://167.235.229.108/<appid>", "success_code": 200, "enabled": True},
-    {"name": "TwentyTwo Cloud", "url": "https://api.twentytwocloud.com/download?appid=<appid>", "success_code": 200, "enabled": True},
-    {"name": "Sushi", "url": "https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/<appid>.zip", "success_code": 200, "enabled": True}
-]
 
 # Custom Styled Label Button (tk.Button has severe color limitations on macOS)
 class LabelButton(tk.Frame):
@@ -131,7 +132,6 @@ class LabelButton(tk.Frame):
         self._state = state
         self.outlined = outlined
         
-        # Border frame for outlined style
         border_color = CAT_BTN_OUTLINE if outlined else bg
         super().__init__(
             parent,
@@ -210,9 +210,6 @@ class LabelButton(tk.Frame):
         self.configure(bg=border_color)
         self.label.configure(bg=self._inner_bg, fg=self._inner_fg, cursor="hand2")
 
-    def configure(self, **kwargs):
-        """Override configure to handle bg on the outer frame."""
-        super().configure(**kwargs)
 
 # Custom Dropdown menu using tk.Label + tk.Menu
 class TkDropdown:
@@ -275,6 +272,7 @@ class TkDropdown:
         else:
             self.lbl.configure(bg=CAT_SURFACE0, fg=CAT_TEXT, cursor="hand2")
 
+
 class ScrollableFrame(tk.Frame):
     def __init__(self, parent, bg=CAT_BASE, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -290,7 +288,6 @@ class ScrollableFrame(tk.Frame):
         )
         
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -308,11 +305,60 @@ class ScrollableFrame(tk.Frame):
         except Exception:
             pass
 
+
+# Sidebar Button for Modern UI layout
+class SidebarButton(tk.Frame):
+    def __init__(self, parent, text, icon, command, active=False):
+        super().__init__(parent, bg=CAT_CRUST, height=45)
+        self.command = command
+        self.active = active
+        self.pack_propagate(False)
+        
+        # Indicator strip on the left
+        self.indicator = tk.Frame(self, bg=CAT_BLUE if active else CAT_CRUST, width=4)
+        self.indicator.pack(side=tk.LEFT, fill=tk.Y)
+        
+        self.lbl = tk.Label(
+            self,
+            text=f"  {icon}   {text}",
+            bg=CAT_MANTLE if active else CAT_CRUST,
+            fg=CAT_TEXT if active else CAT_SUBTEXT0,
+            font=("Helvetica", 11, "bold" if active else "normal"),
+            anchor="w",
+            cursor="hand2"
+        )
+        self.lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.lbl.bind("<Enter>", self.on_enter)
+        self.lbl.bind("<Leave>", self.on_leave)
+        self.lbl.bind("<Button-1>", lambda e: self.on_click())
+        
+    def on_enter(self, e):
+        if not self.active:
+            self.lbl.configure(bg="#1a202c", fg=CAT_TEXT)
+            
+    def on_leave(self, e):
+        if not self.active:
+            self.lbl.configure(bg=CAT_CRUST, fg=CAT_SUBTEXT0)
+            
+    def on_click(self):
+        self.command()
+        
+    def set_active(self, active):
+        self.active = active
+        self.indicator.configure(bg=CAT_BLUE if active else CAT_CRUST)
+        self.lbl.configure(
+            bg=CAT_MANTLE if active else CAT_CRUST,
+            fg=CAT_TEXT if active else CAT_SUBTEXT0,
+            font=("Helvetica", 11, "bold" if active else "normal")
+        )
+
+
 class LuaToolsHelperApp:
     def __init__(self, root):
         self.root = root
         self.root.title("LuaTools macOS Helper")
-        self.root.geometry("800x350")
+        self.root.geometry("900x580")
         self.root.configure(bg=CAT_BASE)
         self.root.resizable(False, False)
         
@@ -344,21 +390,57 @@ class LuaToolsHelperApp:
         # Animation & Flow state
         self.running = True
         self.pulse_phase = False
+        self.current_tab = "dashboard"
         self.app_state = STATE_DETECT
-        self.advanced_expanded = False
-        self.patches_map = {} # listbox index -> appid_str
+        self.patches_map = {}
         
         # Configuration setup
         self.load_settings()
         self.load_apis()
         self.scan_installed_games()
         
-        # Layout container
-        self.container_frame = tk.Frame(self.root, bg=CAT_BASE)
-        self.container_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
+        # ── SIDEBAR NAVIGATION PANEL ──
+        self.sidebar_frame = tk.Frame(self.root, bg=CAT_CRUST, width=200)
+        self.sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.sidebar_frame.pack_propagate(False)
+        
+        # Sidebar Logo & Title
+        logo_container = tk.Frame(self.sidebar_frame, bg=CAT_CRUST, height=70)
+        logo_container.pack(fill=tk.X, pady=(20, 10))
+        logo_container.pack_propagate(False)
+        
+        logo_lbl = tk.Label(logo_container, text="🌙", font=("Helvetica", 22), fg=CAT_BLUE, bg=CAT_CRUST)
+        logo_lbl.pack(side=tk.LEFT, padx=(20, 5))
+        
+        title_lbl = tk.Label(logo_container, text="LuaTools Helper", font=("Helvetica", 13, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
+        title_lbl.pack(side=tk.LEFT, pady=10)
+        
+        # Sidebar Buttons Group
+        self.nav_buttons = {}
+        
+        self.nav_buttons["dashboard"] = SidebarButton(self.sidebar_frame, "Dashboard", "🔍", lambda: self.switch_tab("dashboard"), active=True)
+        self.nav_buttons["dashboard"].pack(fill=tk.X, pady=2)
+        
+        self.nav_buttons["patches"] = SidebarButton(self.sidebar_frame, "Manage Patches", "📦", lambda: self.switch_tab("patches"))
+        self.nav_buttons["patches"].pack(fill=tk.X, pady=2)
+        
+        self.nav_buttons["settings"] = SidebarButton(self.sidebar_frame, "Settings", "⚙️", lambda: self.switch_tab("settings"))
+        self.nav_buttons["settings"].pack(fill=tk.X, pady=2)
+        
+        self.nav_buttons["apis"] = SidebarButton(self.sidebar_frame, "API Catalog", "🌐", lambda: self.switch_tab("apis"))
+        self.nav_buttons["apis"].pack(fill=tk.X, pady=2)
+        
+        # ── CONTENT MAIN PANEL ──
+        self.content_frame = tk.Frame(self.root, bg=CAT_BASE)
+        self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=25, pady=20)
+        
+        # ── PROGRESS / MODAL OVERLAY FRAME ──
+        self.overlay_frame = tk.Frame(self.root, bg=CAT_CRUST, highlightbackground=CAT_SURFACE0, highlightthickness=1)
+        self.overlay_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=500, height=340)
+        self.overlay_frame.place_forget() # Initially hidden
         
         # Render initial screen
-        self.switch_state(STATE_DETECT)
+        self.switch_tab("dashboard")
         
         # Launch background monitors
         self.animate_pulse_loop()
@@ -449,6 +531,16 @@ class LuaToolsHelperApp:
         else:
             self.apis = FALLBACK_APIS
 
+    def save_apis(self):
+        try:
+            os.makedirs(os.path.dirname(DEFAULT_API_FILE), exist_ok=True)
+            with open(DEFAULT_API_FILE, "w") as f:
+                json.dump({"api_list": self.apis}, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Failed to save apis: {e}")
+            return False
+
     def scan_installed_games(self):
         self.installed_games = {}
         self.game_name_to_appid = {}
@@ -484,75 +576,77 @@ class LuaToolsHelperApp:
         except Exception:
             return None, None
 
-    # ── STATE-DRIVEN SWITCHING & RENDERING ──
-    def clear_container(self):
-        for widget in self.container_frame.winfo_children():
+    # ── TAB SWITCHING SYSTEM ──
+    def clear_content(self):
+        for widget in self.content_frame.winfo_children():
             widget.destroy()
 
-    def switch_state(self, new_state):
-        self.app_state = new_state
-        self.clear_container()
+    def switch_tab(self, tab_name):
+        self.current_tab = tab_name
         
-        if new_state == STATE_DETECT:
-            self.root.geometry("800x380")
-            self.render_detect_screen()
-        elif new_state == STATE_DOWNLOAD:
-            self.root.geometry("800x380")
-            self.render_download_screen()
-        elif new_state == STATE_SUCCESS:
-            self.root.geometry("800x300")
-            self.render_success_screen()
-        elif new_state == STATE_RESTART:
-            self.root.geometry("800x280")
-            self.render_restart_screen()
-        elif new_state == STATE_MANAGE:
-            self.root.geometry("800x520")
-            self.render_manage_screen()
+        # Update sidebar button states
+        for name, btn in self.nav_buttons.items():
+            btn.set_active(name == tab_name)
+            
+        self.clear_content()
+        self.overlay_frame.place_forget() # Hide progress overlays
+        
+        if tab_name == "dashboard":
+            self.render_dashboard()
+        elif tab_name == "patches":
+            self.render_patches()
+        elif tab_name == "settings":
+            self.render_settings()
+        elif tab_name == "apis":
+            self.render_apis()
 
-    # ── STATE 0: DETECT SCREEN ──
-    def render_detect_screen(self):
+    # ── TAB 1: DASHBOARD VIEW ──
+    def render_dashboard(self):
         # Header Status Pulse Badge
-        status_bar = tk.Frame(self.container_frame, bg=CAT_CRUST, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0, height=35)
-        status_bar.pack(fill=tk.X, pady=(0, 15))
+        status_bar = tk.Frame(self.content_frame, bg=CAT_CRUST, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0, height=40)
+        status_bar.pack(fill=tk.X, pady=(0, 20))
         status_bar.pack_propagate(False)
         
         self.pulse_canvas = tk.Canvas(status_bar, width=12, height=12, bg=CAT_CRUST, highlightthickness=0)
-        self.pulse_canvas.pack(side=tk.LEFT, padx=(12, 6))
+        self.pulse_canvas.pack(side=tk.LEFT, padx=(15, 8))
         self.pulse_circle = self.pulse_canvas.create_oval(2, 2, 10, 10, fill="#2a4a6b", outline="")
         
-        self.status_lbl = tk.Label(status_bar, text="Waiting for Steam Store activity...", font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
+        self.status_lbl = tk.Label(status_bar, text="Steam Activity Monitor: Waiting for pages...", font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
         self.status_lbl.pack(side=tk.LEFT)
 
         # Scanned Cart & Store Dropdown section
-        scanned_lbl = tk.Label(self.container_frame, text="Recently Viewed & Cart Games:", font=("Helvetica", 11, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
+        scanned_lbl = tk.Label(self.content_frame, text="Recently Viewed & Cart Games:", font=("Helvetica", 11, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
         scanned_lbl.pack(anchor=tk.W, pady=(5, 3))
         
-        # Build options mapping
         detected_options = self.get_scanned_dropdown_options()
-        self.scanned_dropdown = TkDropdown(self.container_frame, detected_options, self.on_dropdown_game_selected)
+        self.scanned_dropdown = TkDropdown(self.content_frame, detected_options, self.on_dropdown_game_selected)
         self.scanned_dropdown.frame.pack(fill=tk.X, pady=2)
         
-        # Display Area Card
-        self.game_card = tk.Frame(self.container_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0, height=110)
-        self.game_card.pack(fill=tk.X, pady=15)
+        # Display Area Card (Glassmorphic)
+        self.game_card = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0, height=180)
+        self.game_card.pack(fill=tk.X, pady=25)
         self.game_card.pack_propagate(False)
         
-        # Left: image thumbnail
-        self.game_card_img = tk.Label(self.game_card, bg=CAT_MANTLE)
-        self.game_card_img.pack(side=tk.LEFT, padx=15, pady=10)
+        # Left: large image thumbnail wrapper in pixel container
+        img_container = tk.Frame(self.game_card, bg=CAT_MANTLE, width=184, height=69)
+        img_container.pack(side=tk.LEFT, padx=20, pady=20)
+        img_container.pack_propagate(False)
+        
+        self.game_card_img = tk.Label(img_container, bg=CAT_MANTLE)
+        self.game_card_img.pack(fill=tk.BOTH, expand=True)
         
         # Right: title and details
         self.game_card_info = tk.Frame(self.game_card, bg=CAT_MANTLE)
-        self.game_card_info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10)
+        self.game_card_info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=20, padx=10)
         
-        self.game_card_title = tk.Label(self.game_card_info, text="No Steam Store Game Detected", font=("Helvetica", 14, "bold"), fg=CAT_TEXT, bg=CAT_MANTLE)
-        self.game_card_title.pack(anchor=tk.W, pady=(15, 2))
+        self.game_card_title = tk.Label(self.game_card_info, text="No Steam Store Game Selected", font=("Helvetica", 15, "bold"), fg=CAT_TEXT, bg=CAT_MANTLE, anchor="w")
+        self.game_card_title.pack(anchor=tk.W, pady=(15, 4))
         
-        self.game_card_sub = tk.Label(self.game_card_info, text="Browse any game store page inside Steam and it will show up here", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
+        self.game_card_sub = tk.Label(self.game_card_info, text="Select a game from the dropdown or browse store pages in Steam", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE, anchor="w")
         self.game_card_sub.pack(anchor=tk.W, pady=2)
         
         # Action Buttons frame
-        btn_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
+        btn_frame = tk.Frame(self.content_frame, bg=CAT_BASE)
         btn_frame.pack(fill=tk.X, pady=(5, 10))
         
         self.btn_add = LabelButton(
@@ -561,58 +655,21 @@ class LuaToolsHelperApp:
             command=self.on_add_clicked,
             bg=CAT_BLUE,
             fg="#0e1621",
-            pady=8
+            pady=10
         )
-        self.btn_add.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.btn_add.pack(fill=tk.X)
         self.btn_add.configure_state("disabled")
         
-        btn_manage = LabelButton(
-            btn_frame,
-            text="Manage Patches",
-            command=lambda: self.switch_state(STATE_MANAGE),
-            bg=CAT_SURFACE0,
-            fg=CAT_TEXT,
-            hover_bg=CAT_SURFACE1,
-            active_bg=CAT_SURFACE1,
-            pady=8,
-            outlined=True
-        )
-        btn_manage.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
-        
-        # Trigger an initial check to populate game details
+        # Initialize selection
         self.on_dropdown_game_selected(detected_options[0])
-
-    def get_scanned_dropdown_options(self):
-        detected = self.scan_steam_activity()
-        options = []
-        for appid, name, source in detected:
-            options.append(f"{name} ({source} - App ID: {appid})")
-        if not options:
-            options.append("No activity detected (Empty)")
-        return options
-
-    def on_dropdown_game_selected(self, selected_str):
-        if "App ID: " in selected_str:
-            match = re.search(r'App ID:\s*(\d+)', selected_str)
-            if match:
-                appid = int(match.group(1))
-                name = selected_str.split(" (")[0]
-                self.set_selected_game(appid, name)
-                return
-        
-        # If manual AppID input has value when advanced is open
-        if hasattr(self, 'adv_appid_ent') and self.adv_appid_ent.get().strip().isdigit():
-            appid = int(self.adv_appid_ent.get().strip())
-            name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
-            self.set_selected_game(appid, name)
-            return
-
-        self.set_selected_game(0, "")
 
     def set_selected_game(self, appid, name):
         self.selected_appid = appid
         self.selected_name = name
         
+        if not hasattr(self, 'game_card_title'):
+            return
+            
         if appid > 0:
             self.game_card_title.configure(text=name, fg=CAT_TEXT)
             self.game_card_sub.configure(text=f"App ID: {appid} | Ready to download patch files", fg=CAT_SUBTEXT0)
@@ -621,444 +678,24 @@ class LuaToolsHelperApp:
             # Load and display image
             self.game_card_img.configure(image="")
             self.load_game_image_async(appid, lambda img: self.game_card_img.configure(image=img) if self.game_card_img.winfo_exists() else None)
-            
-            # Fill manual entry if open
-            if hasattr(self, 'adv_appid_ent'):
-                self.adv_appid_ent.delete(0, tk.END)
-                self.adv_appid_ent.insert(0, str(appid))
         else:
             self.game_card_title.configure(text="No Steam Store Game Selected", fg=CAT_SUBTEXT0)
             self.game_card_sub.configure(text="Select a game from the dropdown or browse store pages in Steam", fg=CAT_SUBTEXT0)
             self.btn_add.configure_state("disabled")
             self.game_card_img.configure(image="")
 
-    def render_manage_screen(self):
-        title_lbl = tk.Label(self.container_frame, text="Manage Patches & Settings", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
+    # ── TAB 2: MANAGE PATCHES VIEW ──
+    def render_patches(self):
+        title_lbl = tk.Label(self.content_frame, text="Manage Installed Patches", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
         title_lbl.pack(anchor=tk.W, pady=(0, 10))
         
-        # Main Grid Frame
-        manage_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
-        manage_frame.pack(fill=tk.BOTH, expand=True)
-        
-        manage_frame.columnconfigure(0, weight=1)
-        manage_frame.columnconfigure(1, weight=1)
-        
-        # LEFT COLUMN: Manual Entry & Settings
-        left_sub = tk.Frame(manage_frame, bg=CAT_BASE)
-        left_sub.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        
-        # AppID Manual entry
-        manual_lbl = tk.Label(left_sub, text="Manual App ID Entry:", font=("Helvetica", 10, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        manual_lbl.pack(anchor=tk.W)
-        
-        entry_bg = tk.Frame(left_sub, bg=CAT_SURFACE0, highlightbackground=CAT_SURFACE1, highlightthickness=1, bd=0)
-        entry_bg.pack(fill=tk.X, pady=(2, 10))
-        self.adv_appid_ent = tk.Entry(entry_bg, bg=CAT_MANTLE, fg=CAT_TEXT, insertbackground=CAT_TEXT, relief="flat", bd=0, font=("Helvetica", 11))
-        self.adv_appid_ent.pack(fill=tk.X, padx=6, pady=4)
-        if hasattr(self, 'selected_appid') and self.selected_appid > 0:
-            self.adv_appid_ent.insert(0, str(self.selected_appid))
-        self.adv_appid_ent.bind("<KeyRelease>", self.on_manual_appid_typed)
-        
-        # Settings Inputs
-        settings_card = tk.Frame(left_sub, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
-        settings_card.pack(fill=tk.BOTH, expand=True)
-        
-        sett_lbl = tk.Label(settings_card, text="Settings & Folders", font=("Helvetica", 10, "bold"), fg=CAT_BLUE, bg=CAT_MANTLE)
-        sett_lbl.pack(anchor=tk.W, padx=10, pady=(8, 2))
-        
-        self.setting_steam_ent = self.create_adv_entry(settings_card, "Steam Path", self.steam_path, self.browse_steam_path)
-        self.setting_temp_ent = self.create_adv_entry(settings_card, "Temp Download Path", self.temp_dir, self.browse_temp_path)
-        self.setting_key_ent = self.create_adv_entry(settings_card, "Morrenus API Key (Optional)", self.morrenus_key, None)
-        
-        save_btn = LabelButton(settings_card, text="Save Settings", command=self.apply_and_save_settings, bg=CAT_BLUE, fg="#0e1621", font=("Helvetica", 9, "bold"), pady=4)
-        save_btn.pack(anchor=tk.E, padx=10, pady=10)
-
-        # RIGHT COLUMN: Installed Patches Scrollable Container
-        right_sub = tk.Frame(manage_frame, bg=CAT_BASE)
-        right_sub.grid(row=0, column=1, sticky="nsew")
-        
-        patches_lbl = tk.Label(right_sub, text="Installed Patches:", font=("Helvetica", 10, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        patches_lbl.pack(anchor=tk.W)
-        
-        list_container = tk.Frame(right_sub, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
-        list_container.pack(fill=tk.BOTH, expand=True, pady=2)
+        list_container = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
+        list_container.pack(fill=tk.BOTH, expand=True, pady=5)
         
         self.scroll_frame = ScrollableFrame(list_container, bg=CAT_MANTLE)
-        self.scroll_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.scroll_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         
         self.refresh_installed_list()
-        
-        # BOTTOM: Back Button
-        btn_back = LabelButton(
-            self.container_frame,
-            text="Back to Detections",
-            command=lambda: self.switch_state(STATE_DETECT),
-            bg=CAT_SURFACE0,
-            fg=CAT_TEXT,
-            pady=6,
-            outlined=True
-        )
-        btn_back.pack(fill=tk.X, pady=(15, 0))
-
-    def create_adv_entry(self, parent, label_text, value, browse_cmd):
-        lbl = tk.Label(parent, text=label_text, font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
-        lbl.pack(anchor=tk.W, padx=10, pady=(5, 1))
-        
-        row = tk.Frame(parent, bg=CAT_MANTLE)
-        row.pack(fill=tk.X, padx=10)
-        
-        entry_bg = tk.Frame(row, bg=CAT_SURFACE0, highlightbackground=CAT_SURFACE1, highlightthickness=1, bd=0)
-        entry_bg.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        ent = tk.Entry(entry_bg, bg=CAT_MANTLE, fg=CAT_TEXT, insertbackground=CAT_TEXT, relief="flat", bd=0, font=("Helvetica", 10))
-        ent.pack(fill=tk.X, padx=4, pady=3)
-        ent.insert(0, value)
-        
-        if browse_cmd:
-            btn_br = LabelButton(row, text="...", command=browse_cmd, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 10, "bold"), pady=3, padx=8)
-            btn_br.pack(side=tk.RIGHT, padx=(5, 0))
-            
-        return ent
-
-    def on_manual_appid_typed(self, event):
-        val = self.adv_appid_ent.get().strip()
-        if val.isdigit():
-            appid = int(val)
-            name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
-            self.selected_appid = appid
-            self.selected_name = name
-            self.game_card_title.configure(text=name, fg=CAT_TEXT)
-            self.game_card_sub.configure(text=f"App ID: {appid} | Ready to download patch files", fg=CAT_SUBTEXT0)
-            self.btn_add.configure_state("normal")
-            if appid not in self.game_name_cache and appid not in self.installed_games:
-                self.resolve_game_name(appid)
-        else:
-            self.btn_add.configure_state("disabled")
-
-    def on_add_clicked(self):
-        if self.selected_appid > 0:
-            self.start_download_flow(self.selected_appid)
-
-    # ── STATE 1: DOWNLOAD SCREEN ──
-    def render_download_screen(self):
-        # Header with cloud icon and title
-        header_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
-        header_frame.pack(fill=tk.X, pady=(5, 12))
-        
-        cloud_canvas = tk.Canvas(header_frame, width=24, height=24, bg=CAT_BASE, highlightthickness=0)
-        cloud_canvas.pack(side=tk.LEFT, padx=(0, 8))
-        cloud_canvas.create_text(12, 12, text="☁", font=("Helvetica", 16), fill=CAT_BLUE)
-        
-        title = tk.Label(header_frame, text="Select Download Source", font=("Helvetica", 16, "bold"), fg=CAT_TEXT, bg=CAT_BASE)
-        title.pack(side=tk.LEFT)
-        
-        # Individual bordered card rows for each API source
-        self.api_status_widgets = {}
-        for api in self.apis:
-            name = api["name"]
-            row_border = tk.Frame(self.container_frame, bg=CAT_CARD_BORDER, bd=0)
-            row_border.pack(fill=tk.X, pady=3)
-            
-            row = tk.Frame(row_border, bg=CAT_MANTLE, bd=0)
-            row.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-            
-            lbl_name = tk.Label(row, text=name, font=("Helvetica", 12), fg=CAT_TEXT, bg=CAT_MANTLE)
-            lbl_name.pack(side=tk.LEFT, padx=12, pady=8)
-            
-            lbl_status = tk.Label(row, text="Waiting...", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
-            lbl_status.pack(side=tk.RIGHT, padx=12, pady=8)
-            self.api_status_widgets[name] = lbl_status
-
-        # Progress description label
-        self.progress_lbl = tk.Label(self.container_frame, text="Searching across sources...", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        self.progress_lbl.pack(pady=(12, 5))
-        
-        # Progress Bar with border outline (matching reference)
-        prog_border = tk.Frame(self.container_frame, bg=CAT_BTN_OUTLINE, bd=0)
-        prog_border.pack(fill=tk.X, pady=(0, 5))
-        self.prog_canvas = tk.Canvas(prog_border, height=14, bg=CAT_MANTLE, highlightthickness=0)
-        self.prog_canvas.pack(fill=tk.X, padx=1, pady=1)
-        self.prog_bar = self.prog_canvas.create_rectangle(0, 0, 0, 14, fill=CAT_BLUE, outline="")
-        
-        # Percentage label
-        self.pct_lbl = tk.Label(self.container_frame, text="0%", font=("Helvetica", 10), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        self.pct_lbl.pack(anchor=tk.W, pady=(0, 12))
-        
-        # Twin buttons: Cancel + Hide (bordered pill style)
-        btn_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
-        btn_frame.pack(fill=tk.X)
-        
-        btn_cancel = LabelButton(btn_frame, text="Cancel", command=lambda: self.switch_state(STATE_DETECT), bg=CAT_SURFACE0, fg=CAT_TEXT, pady=6, outlined=True)
-        btn_cancel.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        btn_hide = LabelButton(btn_frame, text="Hide", command=lambda: self.root.iconify(), bg=CAT_SURFACE0, fg=CAT_TEXT, pady=6, outlined=True)
-        btn_hide.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
-
-    def update_progress(self, percent, text):
-        if self.app_state != STATE_DOWNLOAD:
-            return
-        self.root.after(0, lambda: self._sync_progress(percent, text))
-
-    def _sync_progress(self, percent, text):
-        self.progress_lbl.configure(text=text)
-        width = self.prog_canvas.winfo_width()
-        fill_width = int((percent / 100.0) * width)
-        self.prog_canvas.coords(self.prog_bar, 0, 0, fill_width, 14)
-        if hasattr(self, 'pct_lbl'):
-            self.pct_lbl.configure(text=f"{int(percent)}%")
-
-    def update_api_status(self, name, text, color):
-        if self.app_state != STATE_DOWNLOAD:
-            return
-        if name in self.api_status_widgets:
-            self.root.after(0, lambda: self.api_status_widgets[name].configure(text=text, fg=color))
-
-    # ── STATE 2: SUCCESS SCREEN ──
-    def render_success_screen(self):
-        # Green Circle with checkmark
-        canvas_check = tk.Canvas(self.container_frame, width=50, height=50, bg=CAT_BASE, highlightthickness=0)
-        canvas_check.pack(pady=(20, 8))
-        canvas_check.create_oval(5, 5, 45, 45, fill=CAT_GREEN, outline="")
-        canvas_check.create_text(25, 25, text="✔", font=("Helvetica", 18, "bold"), fill="#ffffff")
-        
-        title = tk.Label(self.container_frame, text="Game Added!", font=("Helvetica", 18, "bold"), fg=CAT_TEXT, bg=CAT_BASE)
-        title.pack(pady=2)
-        
-        sub = tk.Label(self.container_frame, text="The game has been added successfully.", font=("Helvetica", 12), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        sub.pack(pady=(0, 25))
-        
-        btn_close = LabelButton(self.container_frame, text="Close", command=self.on_success_closed, bg=CAT_SURFACE0, fg=CAT_TEXT, pady=6, outlined=True)
-        btn_close.pack(fill=tk.X)
-
-    def on_success_closed(self):
-        # Flow proceeds to restart request prompt
-        self.switch_state(STATE_RESTART)
-
-    # ── STATE 3: RESTART CONFIRMATION SCREEN ──
-    def render_restart_screen(self):
-        # Centered question-mark badge (matching reference)
-        canvas_q = tk.Canvas(self.container_frame, width=40, height=40, bg=CAT_BASE, highlightthickness=0)
-        canvas_q.pack(pady=(15, 5))
-        # Light blue circle outline with ? inside
-        canvas_q.create_oval(2, 2, 38, 38, fill="", outline=CAT_BLUE, width=2)
-        canvas_q.create_text(20, 20, text="?", font=("Helvetica", 16, "bold"), fill=CAT_BLUE)
-        
-        title = tk.Label(self.container_frame, text="LuaTools", font=("Helvetica", 16, "bold"), fg=CAT_TEXT, bg=CAT_BASE)
-        title.pack(pady=2)
-        
-        prompt = tk.Label(self.container_frame, text="Restart Steam now?", font=("Helvetica", 12), fg=CAT_SUBTEXT0, bg=CAT_BASE)
-        prompt.pack(pady=(0, 25))
-        
-        btn_frame = tk.Frame(self.container_frame, bg=CAT_BASE)
-        btn_frame.pack(fill=tk.X)
-        
-        btn_cancel = LabelButton(btn_frame, text="Cancel", command=lambda: self.switch_state(STATE_DETECT), bg=CAT_SURFACE0, fg=CAT_TEXT, pady=8, padx=25, outlined=True)
-        btn_cancel.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        
-        btn_confirm = LabelButton(btn_frame, text="Confirm", command=self.restart_steam_bottle, bg=CAT_BTN_CONFIRM, fg="#0e1621", hover_bg="#80d4f8", active_bg="#3db8e8", pady=8, padx=25)
-        btn_confirm.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-
-    # ── DOWNLOAD FLOW PROCESS ──
-    def start_download_flow(self, appid):
-        self.switch_state(STATE_DOWNLOAD)
-        threading.Thread(target=self.async_download_flow, args=(appid,), daemon=True).start()
-
-    def get_urls_for_appid(self, appid):
-        resolved_items = []
-        for api in self.apis:
-            if not api.get("enabled", True):
-                continue
-            url_template = api.get("url", "")
-            url = url_template.replace("<appid>", str(appid))
-            url = url.replace("<moapikey>", self.morrenus_key)
-            resolved_items.append({"name": api.get("name"), "url": url, "success_code": api.get("success_code", 200)})
-        return resolved_items
-
-    def check_url_available(self, url, expected_code):
-        try:
-            req = urllib.request.Request(url, method='HEAD')
-            req.add_header('User-Agent', 'discord(dot)gg/luatools')
-            with urllib.request.urlopen(req, timeout=5) as response:
-                status = response.status
-        except urllib.error.HTTPError as e:
-            status = e.code
-        except Exception:
-            status = 404
-
-        if status == expected_code:
-            return True
-            
-        try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'discord(dot)gg/luatools')
-            req.add_header('Range', 'bytes=0-0')
-            with urllib.request.urlopen(req, timeout=5) as response:
-                status = response.status
-        except urllib.error.HTTPError as e:
-            status = e.code
-        except Exception:
-            status = 404
-            
-        return status in [expected_code, 206]
-
-    def download_file_with_progress(self, url, dest_path):
-        req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'discord(dot)gg/luatools')
-        with urllib.request.urlopen(req, timeout=20) as response:
-            total_size = int(response.info().get('Content-Length', 0))
-            bytes_downloaded = 0
-            block_size = 8192
-            
-            with open(dest_path, 'wb') as f:
-                while True:
-                    buffer = response.read(block_size)
-                    if not buffer:
-                        break
-                    f.write(buffer)
-                    bytes_downloaded += len(buffer)
-                    if total_size > 0:
-                        percent = int((bytes_downloaded / total_size) * 50) + 10  # download is 10%-60% progress
-                        self.update_progress(percent, f"Downloading... {percent}%")
-
-    def async_download_flow(self, appid):
-        resolved_items = self.get_urls_for_appid(appid)
-        found_url = None
-        found_api_name = None
-        
-        self.update_progress(0, "Connecting to patch servers...")
-        
-        for i, item in enumerate(resolved_items):
-            name = item["name"]
-            url = item["url"]
-            expected_code = item["success_code"]
-            
-            if self.app_state != STATE_DOWNLOAD:
-                return
-                
-            self.update_api_status(name, "Checking...", CAT_YELLOW)
-            success = self.check_url_available(url, expected_code)
-            
-            if success:
-                self.update_api_status(name, "Found ✔", CAT_GREEN)
-                found_url = url
-                found_api_name = name
-                # Mark subsequent APIs as skipped
-                for j in range(i + 1, len(resolved_items)):
-                    self.update_api_status(resolved_items[j]["name"], "Skipped -", CAT_SUBTEXT0)
-                break
-            else:
-                self.update_api_status(name, "Offline ✘", CAT_RED)
-                
-        if not found_url:
-            self.root.after(0, lambda: messagebox.showerror("Download Error", f"Could not find patch files for App ID {appid} on any server."))
-            self.root.after(0, lambda: self.switch_state(STATE_DETECT))
-            return
-            
-        try:
-            self.update_progress(10, f"Downloading from {found_api_name}...")
-            
-            st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
-            depot_cache = os.path.join(self.steam_path, "depotcache")
-            
-            os.makedirs(st_plug_dir, exist_ok=True)
-            os.makedirs(depot_cache, exist_ok=True)
-            os.makedirs(self.temp_dir, exist_ok=True)
-            
-            zip_path = os.path.join(self.temp_dir, f"{appid}.zip")
-            extract_dir = os.path.join(self.temp_dir, f"extracted_{appid}")
-            
-            self.download_file_with_progress(found_url, zip_path)
-            
-            if self.app_state != STATE_DOWNLOAD:
-                return
-                
-            self.update_progress(65, "Extracting fix files...")
-            
-            if os.path.exists(extract_dir):
-                shutil.rmtree(extract_dir)
-            os.makedirs(extract_dir)
-            
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
-                
-            self.update_progress(80, "Installing manifests & configuring script...")
-            extracted_lua_path = None
-            manifests_found = []
-            
-            for root_dir, _, files in os.walk(extract_dir):
-                for file in files:
-                    file_path = os.path.join(root_dir, file)
-                    if file.endswith(".manifest"):
-                        # Normalize Windows backslash paths and use only the basename
-                        clean_name = os.path.basename(file.replace('\\', '/'))
-                        dest = os.path.join(depot_cache, clean_name)
-                        shutil.copy2(file_path, dest)
-                        manifests_found.append(clean_name)
-                    elif file == f"{appid}.lua":
-                        extracted_lua_path = file_path
-                    elif not extracted_lua_path and file.endswith(".lua"):
-                        extracted_lua_path = file_path
-                        
-            if extracted_lua_path and os.path.exists(extracted_lua_path):
-                target_lua = os.path.join(st_plug_dir, f"{appid}.lua")
-                
-                with open(extracted_lua_path, "r", encoding="utf-8", errors="ignore") as lf:
-                    lines = lf.readlines()
-                    
-                processed_lines = []
-                for line in lines:
-                    if "setManifestid(" in line:
-                        processed_lines.append("-- " + line.lstrip())
-                    else:
-                        processed_lines.append(line)
-                        
-                with open(target_lua, "w", encoding="utf-8") as tf:
-                    tf.writelines(processed_lines)
-                    
-                self.update_progress(100, "Success!")
-                time.sleep(0.5)
-                self.root.after(0, lambda: self.switch_state(STATE_SUCCESS))
-            else:
-                raise Exception("No valid .lua file found inside patch package")
-                
-        except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Download Error", f"Failed to download/install: {e}"))
-            self.root.after(0, lambda: self.switch_state(STATE_DETECT))
-        finally:
-            if 'zip_path' in locals() and os.path.exists(zip_path):
-                os.remove(zip_path)
-            if 'extract_dir' in locals() and os.path.exists(extract_dir):
-                shutil.rmtree(extract_dir)
-
-    # ── SETTINGS & ADVANCED OPTIONS PANEL ACTIONS ──
-    def browse_steam_path(self):
-        selected = filedialog.askdirectory(title="Select Steam Installation Folder", initialdir=self.steam_path)
-        if selected:
-            self.setting_steam_ent.delete(0, tk.END)
-            self.setting_steam_ent.insert(0, selected)
-
-    def browse_temp_path(self):
-        selected = filedialog.askdirectory(title="Select Temp Download Folder", initialdir=self.temp_dir)
-        if selected:
-            self.setting_temp_ent.delete(0, tk.END)
-            self.setting_temp_ent.insert(0, selected)
-
-    def apply_and_save_settings(self):
-        self.steam_path = self.setting_steam_ent.get().strip()
-        self.temp_dir = self.setting_temp_ent.get().strip()
-        self.morrenus_key = self.setting_key_ent.get().strip()
-        
-        if self.save_settings():
-            self.scan_installed_games()
-            self.refresh_installed_list()
-            
-            # Refresh activity dropdown
-            opts = self.get_scanned_dropdown_options()
-            self.scanned_dropdown.update_options(opts)
-            self.scanned_dropdown.set(opts[0])
-            self.on_dropdown_game_selected(opts[0])
-            
-            messagebox.showinfo("Success", "Configuration saved and game library rescanned!")
 
     def refresh_installed_list(self):
         if not hasattr(self, 'scroll_frame'):
@@ -1068,8 +705,6 @@ class LuaToolsHelperApp:
             widget.destroy()
             
         self.patches_map = {}
-        
-        # Dictionary of appid_str -> {"status": ..., "has_lua": bool}
         patches_data = {}
         
         # 1. Scan config/stplug-in for lua files
@@ -1110,7 +745,7 @@ class LuaToolsHelperApp:
 
         if not patches_data:
             empty_lbl = tk.Label(self.scroll_frame.scrollable_frame, text="No patches installed.", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
-            empty_lbl.pack(pady=20)
+            empty_lbl.pack(pady=40)
             return
 
         idx = 0
@@ -1122,12 +757,15 @@ class LuaToolsHelperApp:
             
             # Custom Card Container
             card = tk.Frame(self.scroll_frame.scrollable_frame, bg=CAT_BASE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
-            card.pack(fill=tk.X, pady=4, padx=5)
+            card.pack(fill=tk.X, pady=5, padx=5)
             
-            # Left: Game Capsule Image (120x45)
-            img_lbl = tk.Label(card, bg=CAT_BASE, width=120, height=45)
-            img_lbl.pack(side=tk.LEFT, padx=8, pady=5)
-            img_lbl.pack_propagate(False)
+            # Left: Game Capsule Image pixel wrapper (120x45)
+            img_container = tk.Frame(card, bg=CAT_BASE, width=120, height=45)
+            img_container.pack(side=tk.LEFT, padx=10, pady=8)
+            img_container.pack_propagate(False)
+            
+            img_lbl = tk.Label(img_container, bg=CAT_BASE)
+            img_lbl.pack(fill=tk.BOTH, expand=True)
             
             # Load the thumbnail image asynchronously (using 120x45 size)
             self.load_game_image_thumb_async(appid, lambda img, l=img_lbl: l.configure(image=img) if l.winfo_exists() else None)
@@ -1150,7 +788,7 @@ class LuaToolsHelperApp:
             
             # Right: Action Buttons
             btn_frame = tk.Frame(card, bg=CAT_BASE)
-            btn_frame.pack(side=tk.RIGHT, padx=8)
+            btn_frame.pack(side=tk.RIGHT, padx=10)
             
             toggle_action = lambda a=appid_str, s=status: self.toggle_patch_direct(a, s)
             delete_action = lambda a=appid_str, s=status: self.delete_patch_direct(a, s)
@@ -1236,40 +874,408 @@ class LuaToolsHelperApp:
         self.refresh_installed_list()
         messagebox.showinfo("Deleted", f"Successfully removed App ID {appid_str} patch files.")
 
-    def resolve_game_name(self, appid):
-        if appid in self.installed_games or appid in self.game_name_cache:
+    # ── TAB 3: SETTINGS VIEW ──
+    def render_settings(self):
+        title_lbl = tk.Label(self.content_frame, text="Application Settings", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
+        title_lbl.pack(anchor=tk.W, pady=(0, 15))
+        
+        settings_card = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
+        settings_card.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.setting_steam_ent = self.create_adv_entry(settings_card, "CrossOver Steam Path", self.steam_path, self.browse_steam_path)
+        self.setting_temp_ent = self.create_adv_entry(settings_card, "Temp Download Path", self.temp_dir, self.browse_temp_path)
+        self.setting_key_ent = self.create_adv_entry(settings_card, "Morrenus API Key (Optional)", self.morrenus_key, None)
+        
+        save_btn = LabelButton(settings_card, text="Save Settings", command=self.apply_and_save_settings, bg=CAT_BLUE, fg="#0e1621", font=("Helvetica", 10, "bold"), pady=8)
+        save_btn.pack(anchor=tk.E, padx=15, pady=20)
+
+    def create_adv_entry(self, parent, label_text, value, browse_cmd):
+        lbl = tk.Label(parent, text=label_text, font=("Helvetica", 10, "bold"), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
+        lbl.pack(anchor=tk.W, padx=15, pady=(15, 2))
+        
+        row = tk.Frame(parent, bg=CAT_MANTLE)
+        row.pack(fill=tk.X, padx=15)
+        
+        entry_bg = tk.Frame(row, bg=CAT_SURFACE0, highlightbackground=CAT_SURFACE1, highlightthickness=1, bd=0)
+        entry_bg.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        ent = tk.Entry(entry_bg, bg=CAT_MANTLE, fg=CAT_TEXT, insertbackground=CAT_TEXT, relief="flat", bd=0, font=("Helvetica", 11))
+        ent.pack(fill=tk.X, padx=6, pady=5)
+        ent.insert(0, value)
+        
+        if browse_cmd:
+            btn_br = LabelButton(row, text="Browse...", command=browse_cmd, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 10, "bold"), pady=5, padx=10, outlined=True)
+            btn_br.pack(side=tk.RIGHT, padx=(10, 0))
+            
+        return ent
+
+    def browse_steam_path(self):
+        selected = filedialog.askdirectory(title="Select Steam Installation Folder", initialdir=self.steam_path)
+        if selected:
+            self.setting_steam_ent.delete(0, tk.END)
+            self.setting_steam_ent.insert(0, selected)
+
+    def browse_temp_path(self):
+        selected = filedialog.askdirectory(title="Select Temp Download Folder", initialdir=self.temp_dir)
+        if selected:
+            self.setting_temp_ent.delete(0, tk.END)
+            self.setting_temp_ent.insert(0, selected)
+
+    def apply_and_save_settings(self):
+        self.steam_path = self.setting_steam_ent.get().strip()
+        self.temp_dir = self.setting_temp_ent.get().strip()
+        self.morrenus_key = self.setting_key_ent.get().strip()
+        
+        if self.save_settings():
+            self.scan_installed_games()
+            messagebox.showinfo("Success", "Configuration saved and game library rescanned!")
+
+    # ── TAB 4: API CATALOG VIEW ──
+    def render_apis(self):
+        title_lbl = tk.Label(self.content_frame, text="API Catalog Providers", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
+        title_lbl.pack(anchor=tk.W, pady=(0, 15))
+        
+        scroll_container = tk.Frame(self.content_frame, bg=CAT_BASE)
+        scroll_container.pack(fill=tk.BOTH, expand=True)
+        
+        scr = ScrollableFrame(scroll_container, bg=CAT_BASE)
+        scr.pack(fill=tk.BOTH, expand=True)
+        
+        for idx, api in enumerate(self.apis):
+            name = api["name"]
+            url = api["url"]
+            enabled = api.get("enabled", True)
+            
+            card = tk.Frame(scr.scrollable_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
+            card.pack(fill=tk.X, pady=6, padx=5)
+            
+            # Left side checkmark checkbox
+            var = tk.BooleanVar(value=enabled)
+            cb = tk.Checkbutton(
+                card, 
+                text="", 
+                variable=var, 
+                command=lambda i=idx, v=var: self.toggle_api(i, v.get()),
+                bg=CAT_MANTLE, 
+                activebackground=CAT_MANTLE, 
+                selectcolor=CAT_CRUST,
+                highlightthickness=0,
+                bd=0
+            )
+            cb.pack(side=tk.LEFT, padx=15, pady=15)
+            
+            # Center title and url
+            info = tk.Frame(card, bg=CAT_MANTLE)
+            info.pack(side=tk.LEFT, fill=tk.Y, padx=5, expand=True)
+            
+            lbl_name = tk.Label(info, text=name, font=("Helvetica", 12, "bold"), fg=CAT_TEXT, bg=CAT_MANTLE, anchor="w")
+            lbl_name.pack(anchor=tk.W, pady=(5, 0))
+            
+            lbl_url = tk.Label(info, text=url, font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_MANTLE, anchor="w")
+            lbl_url.pack(anchor=tk.W, pady=(0, 5))
+
+    def toggle_api(self, index, val):
+        self.apis[index]["enabled"] = val
+        self.save_apis()
+
+    # ── OVERLAY PROGRESS & DOWNLOAD SHEET FLOW ──
+    def show_progress_overlay(self, title_text):
+        self.clear_overlay()
+        self.overlay_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER, width=500, height=320)
+        
+        self.overlay_title = tk.Label(self.overlay_frame, text=title_text, font=("Helvetica", 15, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
+        self.overlay_title.pack(pady=(20, 10))
+        
+        # Search API grid in overlay
+        self.api_status_widgets = {}
+        for api in self.apis:
+            if not api.get("enabled", True):
+                continue
+            name = api["name"]
+            row = tk.Frame(self.overlay_frame, bg=CAT_MANTLE, height=28)
+            row.pack(fill=tk.X, padx=20, pady=2)
+            row.pack_propagate(False)
+            
+            lbl_name = tk.Label(row, text=name, font=("Helvetica", 10), fg=CAT_TEXT, bg=CAT_MANTLE)
+            lbl_name.pack(side=tk.LEFT, padx=10)
+            
+            lbl_status = tk.Label(row, text="Searching...", font=("Helvetica", 10), fg=CAT_SUBTEXT0, bg=CAT_MANTLE)
+            lbl_status.pack(side=tk.RIGHT, padx=10)
+            self.api_status_widgets[name] = lbl_status
+            
+        # Progress status and bar
+        self.progress_lbl = tk.Label(self.overlay_frame, text="Connecting...", font=("Helvetica", 10), fg=CAT_SUBTEXT0, bg=CAT_CRUST)
+        self.progress_lbl.pack(pady=(15, 2))
+        
+        prog_border = tk.Frame(self.overlay_frame, bg=CAT_BTN_OUTLINE, bd=0)
+        prog_border.pack(fill=tk.X, padx=20, pady=2)
+        self.prog_canvas = tk.Canvas(prog_border, height=12, bg=CAT_MANTLE, highlightthickness=0)
+        self.prog_canvas.pack(fill=tk.X, padx=1, pady=1)
+        self.prog_bar = self.prog_canvas.create_rectangle(0, 0, 0, 12, fill=CAT_BLUE, outline="")
+        
+        self.pct_lbl = tk.Label(self.overlay_frame, text="0%", font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_CRUST)
+        self.pct_lbl.pack(anchor=tk.W, padx=20)
+        
+        # Buttons
+        btn_frame = tk.Frame(self.overlay_frame, bg=CAT_CRUST)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(15, 10))
+        
+        btn_cancel = LabelButton(btn_frame, text="Cancel", command=self.cancel_download_flow, bg=CAT_SURFACE0, fg=CAT_TEXT, pady=5, outlined=True)
+        btn_cancel.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        btn_hide = LabelButton(btn_frame, text="Minimize", command=lambda: self.root.iconify(), bg=CAT_SURFACE0, fg=CAT_TEXT, pady=5, outlined=True)
+        btn_hide.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+
+    def clear_overlay(self):
+        for widget in self.overlay_frame.winfo_children():
+            widget.destroy()
+
+    def cancel_download_flow(self):
+        self.app_state = STATE_DETECT
+        self.overlay_frame.place_forget()
+
+    def start_download_flow(self, appid):
+        self.app_state = STATE_DOWNLOAD
+        self.show_progress_overlay(f"Patching {self.selected_name}")
+        threading.Thread(target=self.async_download_flow, args=(appid,), daemon=True).start()
+
+    def update_progress(self, percent, text):
+        if self.app_state != STATE_DOWNLOAD:
             return
-        threading.Thread(target=self.async_resolve_game_name, args=(appid,), daemon=True).start()
+        self.root.after(0, lambda: self._sync_progress(percent, text))
 
-    def async_resolve_game_name(self, appid):
+    def _sync_progress(self, percent, text):
+        if not hasattr(self, 'prog_canvas') or not self.prog_canvas.winfo_exists():
+            return
+        self.progress_lbl.configure(text=text)
+        width = self.prog_canvas.winfo_width()
+        fill_width = int((percent / 100.0) * width)
+        self.prog_canvas.coords(self.prog_bar, 0, 0, fill_width, 12)
+        if hasattr(self, 'pct_lbl'):
+            self.pct_lbl.configure(text=f"{int(percent)}%")
+
+    def update_api_status(self, name, text, color):
+        if self.app_state != STATE_DOWNLOAD:
+            return
+        if name in self.api_status_widgets:
+            self.root.after(0, lambda: self.api_status_widgets[name].configure(text=text, fg=color))
+
+    # Show Success dialog in overlay
+    def show_success_overlay(self):
+        self.clear_overlay()
+        
+        canvas_check = tk.Canvas(self.overlay_frame, width=50, height=50, bg=CAT_CRUST, highlightthickness=0)
+        canvas_check.pack(pady=(25, 8))
+        canvas_check.create_oval(5, 5, 45, 45, fill=CAT_GREEN, outline="")
+        canvas_check.create_text(25, 25, text="✔", font=("Helvetica", 18, "bold"), fill="#ffffff")
+        
+        title = tk.Label(self.overlay_frame, text="Download Successful!", font=("Helvetica", 16, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
+        title.pack(pady=2)
+        
+        sub = tk.Label(self.overlay_frame, text="Patch files and manifests have been installed.", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_CRUST)
+        sub.pack(pady=(0, 20))
+        
+        btn_next = LabelButton(self.overlay_frame, text="Configure Steam", command=self.show_restart_overlay, bg=CAT_BLUE, fg="#0e1621", pady=8)
+        btn_next.pack(fill=tk.X, padx=30, pady=10)
+
+    def show_restart_overlay(self):
+        self.clear_overlay()
+        
+        canvas_q = tk.Canvas(self.overlay_frame, width=45, height=45, bg=CAT_CRUST, highlightthickness=0)
+        canvas_q.pack(pady=(20, 8))
+        canvas_q.create_oval(2, 2, 43, 43, fill="", outline=CAT_BLUE, width=2)
+        canvas_q.create_text(22, 22, text="?", font=("Helvetica", 16, "bold"), fill=CAT_BLUE)
+        
+        title = tk.Label(self.overlay_frame, text="Restart Steam Bottle?", font=("Helvetica", 16, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
+        title.pack(pady=2)
+        
+        prompt = tk.Label(self.overlay_frame, text="You must restart Steam in order to load the new manifests.", font=("Helvetica", 11), fg=CAT_SUBTEXT0, bg=CAT_CRUST)
+        prompt.pack(pady=(0, 25))
+        
+        btn_frame = tk.Frame(self.overlay_frame, bg=CAT_CRUST)
+        btn_frame.pack(fill=tk.X, padx=30)
+        
+        btn_cancel = LabelButton(btn_frame, text="Later", command=self.close_overlay, bg=CAT_SURFACE0, fg=CAT_TEXT, pady=8, outlined=True)
+        btn_cancel.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        btn_confirm = LabelButton(btn_frame, text="Restart Steam", command=self.restart_steam_bottle, bg=CAT_BTN_CONFIRM, fg="#0e1621", hover_bg="#80d4f8", active_bg="#3db8e8", pady=8)
+        btn_confirm.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+
+    def close_overlay(self):
+        self.app_state = STATE_DETECT
+        self.overlay_frame.place_forget()
+        self.switch_tab("dashboard")
+
+    # ── DOWNLOAD FLOW PROCESS ──
+    def get_urls_for_appid(self, appid):
+        resolved_items = []
+        for api in self.apis:
+            if not api.get("enabled", True):
+                continue
+            url_template = api.get("url", "")
+            url = url_template.replace("<appid>", str(appid))
+            url = url.replace("<moapikey>", self.morrenus_key)
+            resolved_items.append({"name": api.get("name"), "url": url, "success_code": api.get("success_code", 200)})
+        return resolved_items
+
+    def check_url_available(self, url, expected_code):
         try:
-            url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0')
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'discord(dot)gg/luatools')
             with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                if str(appid) in data and data[str(appid)].get('success'):
-                    game_name = data[str(appid)]['data'].get('name', f"Game {appid}")
-                    self.game_name_cache[appid] = game_name
-                    # Trigger UI refresh
-                    self.root.after(0, self.refresh_lists_and_dropdown)
+                status = response.status
+        except urllib.error.HTTPError as e:
+            status = e.code
         except Exception:
-            pass
+            status = 404
 
-    def refresh_lists_and_dropdown(self):
-        if self.app_state == STATE_DETECT:
-            # Refresh dropdown list keeping selection
-            selected_idx = self.scanned_dropdown.options.index(self.scanned_dropdown.get()) if self.scanned_dropdown.get() in self.scanned_dropdown.options else 0
-            opts = self.get_scanned_dropdown_options()
-            self.scanned_dropdown.update_options(opts)
-            if selected_idx < len(opts):
-                self.scanned_dropdown.set(opts[selected_idx])
-            self.refresh_installed_list()
+        if status == expected_code:
+            return True
+            
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'discord(dot)gg/luatools')
+            req.add_header('Range', 'bytes=0-0')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                status = response.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+        except Exception:
+            status = 404
+            
+        return status in [expected_code, 206]
+
+    def download_file_with_progress(self, url, dest_path):
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'discord(dot)gg/luatools')
+        with urllib.request.urlopen(req, timeout=20) as response:
+            total_size = int(response.info().get('Content-Length', 0))
+            bytes_downloaded = 0
+            block_size = 8192
+            
+            with open(dest_path, 'wb') as f:
+                while True:
+                    buffer = response.read(block_size)
+                    if not buffer:
+                        break
+                    f.write(buffer)
+                    bytes_downloaded += len(buffer)
+                    if total_size > 0:
+                        percent = int((bytes_downloaded / total_size) * 50) + 10  # download is 10%-60% progress
+                        self.update_progress(percent, "Downloading patch archive...")
+
+    def async_download_flow(self, appid):
+        try:
+            self.update_progress(5, "Resolving download APIs...")
+            time.sleep(0.3)
+            
+            available_urls = self.get_urls_for_appid(appid)
+            found_url = None
+            
+            # Step 1: Query head response on available APIs
+            for item in available_urls:
+                name = item["name"]
+                url = item["url"]
+                expected = item["success_code"]
+                
+                self.update_api_status(name, "Checking...", CAT_BLUE)
+                
+                if self.check_url_available(url, expected):
+                    self.update_api_status(name, "Found Fix!", CAT_GREEN)
+                    found_url = url
+                    break
+                else:
+                    self.update_api_status(name, "Not Found", CAT_RED)
+                    
+            if not found_url:
+                raise Exception("No active fixes found for this game in the API list.")
+                
+            self.update_progress(10, "Starting download...")
+            
+            st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
+            depot_cache = os.path.join(self.steam_path, "depotcache")
+            
+            os.makedirs(st_plug_dir, exist_ok=True)
+            os.makedirs(depot_cache, exist_ok=True)
+            os.makedirs(self.temp_dir, exist_ok=True)
+            
+            zip_path = os.path.join(self.temp_dir, f"{appid}.zip")
+            extract_dir = os.path.join(self.temp_dir, f"extracted_{appid}")
+            
+            self.download_file_with_progress(found_url, zip_path)
+            
+            if self.app_state != STATE_DOWNLOAD:
+                return
+                
+            self.update_progress(65, "Extracting fix files...")
+            
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir)
+            os.makedirs(extract_dir)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+                
+            self.update_progress(80, "Installing manifests & configuring script...")
+            extracted_lua_path = None
+            manifests_found = []
+            
+            for root_dir, _, files in os.walk(extract_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    if file.endswith(".manifest"):
+                        clean_name = os.path.basename(file.replace('\\', '/'))
+                        dest = os.path.join(depot_cache, clean_name)
+                        shutil.copy2(file_path, dest)
+                        manifests_found.append(clean_name)
+                    elif file == f"{appid}.lua":
+                        extracted_lua_path = file_path
+                    elif not extracted_lua_path and file.endswith(".lua"):
+                        extracted_lua_path = file_path
+                        
+            if extracted_lua_path and os.path.exists(extracted_lua_path):
+                target_lua = os.path.join(st_plug_dir, f"{appid}.lua")
+                
+                with open(extracted_lua_path, "r", encoding="utf-8", errors="ignore") as lf:
+                    lines = lf.readlines()
+                    
+                processed_lines = []
+                for line in lines:
+                    if "setManifestid(" in line:
+                        processed_lines.append("-- " + line.lstrip())
+                    else:
+                        processed_lines.append(line)
+                        
+                with open(target_lua, "w", encoding="utf-8") as tf:
+                    tf.writelines(processed_lines)
+                    
+                self.update_progress(100, "Success!")
+                time.sleep(0.5)
+                self.root.after(0, self.show_success_overlay)
+            else:
+                self.update_progress(100, "Success (Manifest Only)!")
+                time.sleep(0.5)
+                self.root.after(0, self.show_success_overlay)
+                
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Download Error", f"Failed to download/install: {e}"))
+            self.root.after(0, self.close_overlay)
+        finally:
+            if 'zip_path' in locals() and os.path.exists(zip_path):
+                try:
+                    os.remove(zip_path)
+                except Exception:
+                    pass
+            if 'extract_dir' in locals() and os.path.exists(extract_dir):
+                try:
+                    shutil.rmtree(extract_dir)
+                except Exception:
+                    pass
 
     # ── STEAM CLOSING & RESTART LOGIC ──
     def restart_steam_bottle(self):
         try:
-            # Kill Steam Win32 processes running under CrossOver/Wine prefix
+            self.update_progress(50, "Restarting Steam...")
             os.system("pkill -9 -f steam.exe")
             os.system("pkill -9 -f steamwebhelper.exe")
             os.system("pkill -9 -f Steam.app")
@@ -1278,17 +1284,16 @@ class LuaToolsHelperApp:
             print(f"Error terminating Steam: {e}")
             
         try:
-            # Relaunch the specific CrossOver Steam launcher app
             launcher_path = "/Users/Vedant/Applications/CrossOver/Steam/Steam.app"
             if os.path.exists(launcher_path):
                 os.system(f'open "{launcher_path}"')
-                self.switch_state(STATE_DETECT)
+                self.root.after(0, self.close_overlay)
             else:
                 messagebox.showinfo("Steam Closed", "Steam has been closed. Please launch Steam manually from CrossOver.")
-                self.switch_state(STATE_DETECT)
+                self.root.after(0, self.close_overlay)
         except Exception as e:
             print(f"Error relaunching Steam: {e}")
-            self.switch_state(STATE_DETECT)
+            self.root.after(0, self.close_overlay)
 
     # ── PULSING LIGHT & STEAM MONITORING ──
     def animate_pulse_loop(self):
@@ -1297,238 +1302,99 @@ class LuaToolsHelperApp:
             
         self.pulse_phase = not self.pulse_phase
         
-        if self.app_state == STATE_DETECT:
-            # Update connection/activity indicator color
+        if hasattr(self, 'pulse_canvas') and self.pulse_canvas.winfo_exists():
             is_active = (self.active_running_appid > 0 or self.last_detected_store_appid > 0)
             if is_active:
-                color = CAT_BLUE if self.pulse_phase else "#3d8ecf"
-                self.status_lbl.configure(text=f"Detected Store Game: {self.selected_name}", fg=CAT_BLUE)
+                color = CAT_GREEN if self.pulse_phase else "#1f5e2b"
+                self.status_lbl.configure(text=f"Steam Activity: Connected ({self.active_running_name if self.active_running_appid > 0 else self.last_detected_store_name})", fg=CAT_GREEN)
             else:
-                color = "#2a4a6b"
-                self.status_lbl.configure(text="Waiting for Steam Store activity...", fg=CAT_TEXT)
+                color = CAT_BLUE if self.pulse_phase else "#1e375a"
+                self.status_lbl.configure(text="Steam Activity: Listening (Waiting for pages)...", fg=CAT_TEXT)
             self.pulse_canvas.itemconfig(self.pulse_circle, fill=color)
             
-        self.root.after(500, self.animate_pulse_loop)
+        self.root.after(800, self.animate_pulse_loop)
 
     def steam_monitor_loop(self):
-        cef_log_path = os.path.join(self.steam_path, "logs/cef_log.txt")
-        if os.path.exists(cef_log_path):
-            self.cef_log_position = os.path.getsize(cef_log_path)
-            
-        js_log_path = os.path.join(self.steam_path, "logs/webhelper_js.txt")
-        if os.path.exists(js_log_path):
-            self.js_log_position = os.path.getsize(js_log_path)
-            
-        bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
-        history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
-        last_history_mtime = 0
-        
         while self.running:
             try:
-                self.check_running_game()
+                time.sleep(3.0)
                 self.check_cef_logs()
-                self.check_webhelper_js_logs()
-                
-                if os.path.exists(history_path):
-                    try:
-                        mtime = os.path.getmtime(history_path)
-                        if mtime > last_history_mtime:
-                            last_history_mtime = mtime
-                            self.check_steam_history()
-                    except Exception as e:
-                        print(f"Error checking history mtime: {e}")
+                self.check_history_db()
             except Exception as e:
-                print(f"Error in monitor loop: {e}")
-            time.sleep(0.25)
-
-    def check_running_game(self):
-        # Poll user.reg for RunningAppID
-        user_reg_path = os.path.join(os.path.dirname(os.path.dirname(self.steam_path)), "user.reg")
-        if not os.path.exists(user_reg_path):
-            return
-            
-        try:
-            mtime = os.path.getmtime(user_reg_path)
-            if mtime > self.last_user_reg_mtime:
-                self.last_user_reg_mtime = mtime
-                appid = 0
-                in_steam_section = False
-                
-                with open(user_reg_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith('[Software\\Valve\\Steam]'):
-                            in_steam_section = True
-                        elif line.startswith('[') and in_steam_section:
-                            break
-                        elif in_steam_section and line.startswith('"RunningAppID"=dword:'):
-                            hex_str = line.split(':')[-1]
-                            appid = int(hex_str, 16)
-                            break
-                
-                if appid != self.active_running_appid:
-                    self.active_running_appid = appid
-                    if appid > 0:
-                        name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
-                        self.active_running_name = name
-                        self.resolve_game_name(appid)
-                        
-                        # Automatically select it and check
-                        if self.app_state == STATE_DETECT:
-                            self.root.after(0, lambda: self.set_selected_game(appid, name))
-                    else:
-                        self.active_running_name = ""
-        except Exception as e:
-            print(f"Error reading user.reg: {e}")
+                print(f"Error in monitor thread: {e}")
 
     def check_cef_logs(self):
-        cef_log_path = os.path.join(self.steam_path, "logs/cef_log.txt")
-        if not os.path.exists(cef_log_path):
+        log_path = os.path.join(self.steam_path, "logs/cef.log")
+        if not os.path.exists(log_path):
             return
-            
         try:
-            size = os.path.getsize(cef_log_path)
-            if size < self.cef_log_position:
-                self.cef_log_position = 0
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if size < self.cef_log_position:
+                    self.cef_log_position = 0
+                f.seek(self.cef_log_position)
                 
-            if size > self.cef_log_position:
-                with open(cef_log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(self.cef_log_position)
-                    lines = f.readlines()
-                    self.cef_log_position = f.tell()
-                    
-                for line in reversed(lines):
-                    match = re.search(r'store\.steampowered\.com/app/(\d+)(?:/([^/\s\'\"]+))?', line)
+                lines = f.readlines()
+                self.cef_log_position = f.tell()
+                
+                for line in lines:
+                    match = re.search(r'store\.steampowered\.com/app/(\d+)', line)
                     if match:
                         appid = int(match.group(1))
-                        if appid in [228980]: # Skip Steamworks Common Redistributables
+                        if appid == 228980: 
                             continue
-                            
-                        slug = match.group(2) if match.group(2) else ""
-                        name = slug.replace('_', ' ').replace('-', ' ').title()
-                        
+                        name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
                         if appid != self.last_detected_store_appid:
                             self.last_detected_store_appid = appid
-                            self.last_detected_store_name = name if name else f"Game {appid}"
-                            self.resolve_game_name(appid)
-                            
-                            # Auto select on main screen
-                            if self.app_state == STATE_DETECT:
-                                self.root.after(0, lambda: self.set_selected_game(appid, self.last_detected_store_name))
-                            break
-        except Exception as e:
-            print(f"Error parsing cef logs: {e}")
+                            self.last_detected_store_name = name
+                            self.root.after(0, lambda: self.handle_new_store_game_detected(appid, name))
+        except Exception:
+            pass
 
-    def check_webhelper_js_logs(self):
-        js_log_path = os.path.join(self.steam_path, "logs/webhelper_js.txt")
-        if not os.path.exists(js_log_path):
-            return
-            
-        try:
-            size = os.path.getsize(js_log_path)
-            if size < self.js_log_position:
-                self.js_log_position = 0
-                
-            if size > self.js_log_position:
-                with open(js_log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(self.js_log_position)
-                    lines = f.readlines()
-                    self.js_log_position = f.tell()
-                    
-                for line in reversed(lines):
-                    match = re.search(r'store\.steampowered\.com/(?:agecheck/)?app/(\d+)(?:/([^/\s\'\":\?]+))?', line)
-                    if match:
-                        appid = int(match.group(1))
-                        if appid in [228980]:
-                            continue
-                            
-                        slug = match.group(2) if match.group(2) else ""
-                        name = slug.replace('_', ' ').replace('-', ' ').title()
-                        
-                        if appid != self.last_detected_store_appid:
-                            self.last_detected_store_appid = appid
-                            self.last_detected_store_name = name if name else f"Game {appid}"
-                            self.resolve_game_name(appid)
-                            
-                            if self.app_state == STATE_DETECT:
-                                self.root.after(0, lambda: self.handle_new_store_game_detected(appid, self.last_detected_store_name))
-                            break
-        except Exception as e:
-            print(f"Error parsing webhelper js logs: {e}")
-
-    def check_steam_history(self):
+    def check_history_db(self):
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
         history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
         if not os.path.exists(history_path):
             return
-            
+        
         try:
-            conn = sqlite3.connect(f"file:{history_path}?immutable=1", uri=True)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT url, title FROM urls "
-                "WHERE url LIKE '%store.steampowered.com/app/%' OR url LIKE '%store.steampowered.com/cart%' "
-                "ORDER BY last_visit_time DESC LIMIT 1"
-            )
-            row = cursor.fetchone()
-            if row:
-                url = row[0]
-                title = row[1]
-                match = re.search(r'store\.steampowered\.com/(?:agecheck/)?app/(\d+)(?:/([^/]+))?', url)
-                if match:
-                    appid = int(match.group(1))
-                    if appid not in [228980]:
-                        slug = match.group(2) if match.group(2) else ""
-                        name = slug.replace('_', ' ').replace('-', ' ').title()
-                        if title and "on Steam" in title:
-                            t_clean = title.split(" on Steam")[0]
-                            if "Save " in t_clean and "%" in t_clean:
-                                parts = t_clean.split(" on ")
-                                if len(parts) > 1:
-                                    t_clean = parts[-1]
-                            name = t_clean.strip()
-                        
-                        if appid != self.last_detected_store_appid:
-                            self.last_detected_store_appid = appid
-                            self.last_detected_store_name = name if name else f"Game {appid}"
-                            self.resolve_game_name(appid)
-                            
-                            if self.app_state == STATE_DETECT:
-                                self.root.after(0, lambda: self.handle_new_store_game_detected(appid, self.last_detected_store_name))
-            conn.close()
-        except Exception as e:
-            print(f"Error checking History in monitor loop: {e}")
+            mtime = os.path.getmtime(history_path)
+            if mtime <= self.last_user_reg_mtime:
+                return
+            self.last_user_reg_mtime = mtime
+            self.root.after(0, self.refresh_lists_and_dropdown)
+        except Exception:
+            pass
 
     def handle_new_store_game_detected(self, appid, name):
         self.set_selected_game(appid, name)
-        opts = self.get_scanned_dropdown_options()
-        self.scanned_dropdown.update_options(opts)
-        
-        matching_opt = None
-        for opt in opts:
-            if f"App ID: {appid}" in opt:
-                matching_opt = opt
-                break
-        if matching_opt:
-            self.scanned_dropdown.set(matching_opt)
+        if hasattr(self, 'scanned_dropdown'):
+            opts = self.get_scanned_dropdown_options()
+            self.scanned_dropdown.update_options(opts)
+            
+            matching_opt = None
+            for opt in opts:
+                if f"App ID: {appid}" in opt:
+                    matching_opt = opt
+                    break
+            if matching_opt:
+                self.scanned_dropdown.set(matching_opt)
 
     def scan_steam_activity(self):
         detected_games = []
         seen_appids = set()
 
-        # 1. Currently running game
         if self.active_running_appid > 0:
             name = self.installed_games.get(self.active_running_appid, self.game_name_cache.get(self.active_running_appid, self.active_running_name))
             detected_games.append((self.active_running_appid, name, "Running"))
             seen_appids.add(self.active_running_appid)
 
-        # 2. CEF store views
         if self.last_detected_store_appid > 0 and self.last_detected_store_appid not in seen_appids:
             name = self.installed_games.get(self.last_detected_store_appid, self.game_name_cache.get(self.last_detected_store_appid, self.last_detected_store_name))
             detected_games.append((self.last_detected_store_appid, name, "Active Store Page"))
             seen_appids.add(self.last_detected_store_appid)
 
-        # 3. Chromium History records
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
         history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
         if os.path.exists(history_path):
@@ -1552,50 +1418,83 @@ class LuaToolsHelperApp:
                         if appid not in seen_appids:
                             slug = match.group(2) if match.group(2) else ""
                             name = slug.replace('_', ' ').replace('-', ' ').title()
-                            if title and "on Steam" in title:
-                                t_clean = title.split(" on Steam")[0]
-                                if "Save " in t_clean and "%" in t_clean:
-                                    parts = t_clean.split(" on ")
-                                    if len(parts) > 1:
-                                        t_clean = parts[-1]
-                                name = t_clean.strip()
-                            name = self.installed_games.get(appid, self.game_name_cache.get(appid, name if name else f"Game {appid}"))
+                            if not name and title:
+                                name = title.replace(" on Steam", "").strip()
+                            if not name:
+                                name = f"Game {appid}"
                             detected_games.append((appid, name, "Store History"))
                             seen_appids.add(appid)
                 conn.close()
             except Exception as e:
-                print(f"Error scanning History: {e}")
+                print(f"Error checking History in monitor loop: {e}")
 
-        # 4. Library Games (ACF)
+        # Scan installed directory as fallback
         for appid, name in self.installed_games.items():
             if appid not in seen_appids:
                 detected_games.append((appid, name, "Installed"))
-                seen_appids.add(appid)
-
         return detected_games
 
-    def cleanup(self):
-        self.running = False
+    def get_scanned_dropdown_options(self):
+        detected = self.scan_steam_activity()
+        options = []
+        for appid, name, source in detected:
+            options.append(f"{name} ({source} - App ID: {appid})")
+        if not options:
+            options.append("No activity detected (Empty)")
+        return options
+
+    def on_dropdown_game_selected(self, option):
+        match = re.search(r'App ID: (\d+)', option)
+        if match:
+            appid = int(match.group(1))
+            name = option.split(" (")[0]
+            self.set_selected_game(appid, name)
+        else:
+            self.set_selected_game(0, "")
+
+    def on_add_clicked(self):
+        if self.selected_appid > 0:
+            self.start_download_flow(self.selected_appid)
+
+    def resolve_game_name(self, appid):
+        if appid in self.installed_games or appid in self.game_name_cache:
+            return
+        threading.Thread(target=self.async_resolve_game_name, args=(appid,), daemon=True).start()
+
+    def async_resolve_game_name(self, appid):
+        try:
+            url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if str(appid) in data and data[str(appid)].get('success'):
+                    game_name = data[str(appid)]['data'].get('name', f"Game {appid}")
+                    self.game_name_cache[appid] = game_name
+                    self.root.after(0, self.refresh_lists_and_dropdown)
+        except Exception:
+            pass
+
+    def refresh_lists_and_dropdown(self):
+        if self.current_tab == "dashboard":
+            selected_idx = self.scanned_dropdown.options.index(self.scanned_dropdown.get()) if self.scanned_dropdown.get() in self.scanned_dropdown.options else 0
+            opts = self.get_scanned_dropdown_options()
+            self.scanned_dropdown.update_options(opts)
+            if selected_idx < len(opts):
+                self.scanned_dropdown.set(opts[selected_idx])
+        elif self.current_tab == "patches":
+            self.refresh_installed_list()
+
 
 if __name__ == "__main__":
-    if not os.path.exists(DEFAULT_STEAM_PATH):
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showwarning("Path Warning", f"Steam path not found at:\n{DEFAULT_STEAM_PATH}\n\nPlease select your Steam installation folder.")
-        selected_dir = filedialog.askdirectory(title="Select Steam Installation Folder")
-        if not selected_dir:
-            sys.exit(1)
-        DEFAULT_STEAM_PATH = selected_dir
-        DEFAULT_SETTINGS_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/data/settings.json")
-        DEFAULT_API_FILE = os.path.join(DEFAULT_STEAM_PATH, "millennium/plugins/tools/backend/api.json")
-        root.destroy()
-
+    # Launch main application
     root = tk.Tk()
     app = LuaToolsHelperApp(root)
     
+    # Simple clean close handler
     def on_closing():
-        app.cleanup()
+        app.running = False
         root.destroy()
-        
     root.protocol("WM_DELETE_WINDOW", on_closing)
+    
     root.mainloop()
