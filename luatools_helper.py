@@ -1640,20 +1640,22 @@ class LuaToolsHelperApp:
     def check_history_db(self):
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
         history_path = os.path.join(bottle_root, "drive_c/users/crossover/AppData/Local/Steam/htmlcache/Default/History")
-        history_journal = history_path + "-journal"
         if not os.path.exists(history_path):
             return
         
         try:
-            # Check modification time of both history db and its rollback journal to capture updates instantly
-            mtime = os.path.getmtime(history_path)
-            if os.path.exists(history_journal):
-                mtime = max(mtime, os.path.getmtime(history_journal))
-                
-            if mtime <= self.last_user_reg_mtime:
-                return
-            self.last_user_reg_mtime = mtime
-            self.root.after(0, self.refresh_lists_and_dropdown)
+            # Query the database directly to bypass filesystem modtime caching/delays
+            conn = sqlite3.connect(f"file:{history_path}?immutable=1", uri=True)
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(last_visit_time) FROM urls WHERE url LIKE '%store.steampowered.com/app/%'")
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row and row[0]:
+                latest_time = row[0]
+                if latest_time > self.last_user_reg_mtime:
+                    self.last_user_reg_mtime = latest_time
+                    self.root.after(0, self.refresh_lists_and_dropdown)
         except Exception:
             pass
 
