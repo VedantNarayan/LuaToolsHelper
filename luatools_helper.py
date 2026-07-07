@@ -446,6 +446,10 @@ class TkDropdown:
 
 
 class ScrollableFrame(tk.Frame):
+    """A scrollable frame that works reliably on macOS with 2-finger gesture and mouse wheel."""
+    # Class-level registry of all active ScrollableFrames
+    _active_instances = []
+    
     def __init__(self, parent, bg=CAT_BASE, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0, bg=bg)
@@ -455,7 +459,7 @@ class ScrollableFrame(tk.Frame):
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(
-                scrollregion=(0, 0, self.scrollable_frame.winfo_reqwidth(), self.scrollable_frame.winfo_reqheight())
+                scrollregion=self.canvas.bbox("all")
             )
         )
         
@@ -468,8 +472,71 @@ class ScrollableFrame(tk.Frame):
         
         self.canvas.bind('<Configure>', self._on_canvas_configure)
         
+        # Register and bind globally - handles 2-finger trackpad + mouse wheel
+        ScrollableFrame._active_instances.append(self)
+        root = self.winfo_toplevel()
+        # Only set up the global handler once on the root
+        if not hasattr(root, '_scroll_handler_set'):
+            root._scroll_handler_set = True
+            root.bind_all('<MouseWheel>', ScrollableFrame._global_mousewheel)
+            root.bind_all('<Button-4>', ScrollableFrame._global_mousewheel)
+            root.bind_all('<Button-5>', ScrollableFrame._global_mousewheel)
+        
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
+    
+    @staticmethod
+    def _global_mousewheel(event):
+        """Route mousewheel to the visible ScrollableFrame under the mouse."""
+        import math
+        try:
+            # Find which ScrollableFrame (if any) contains the mouse pointer
+            widget = event.widget
+            # Walk up from the event widget to find a ScrollableFrame ancestor
+            target = None
+            w = widget
+            while w is not None:
+                if isinstance(w, ScrollableFrame):
+                    target = w
+                    break
+                w = w.master
+            
+            # If not found by ancestry, check all instances for visibility
+            if target is None:
+                for sf in ScrollableFrame._active_instances:
+                    try:
+                        if sf.winfo_ismapped() and sf.winfo_viewable():
+                            # Check if mouse is within this frame's bounds
+                            x, y = sf.winfo_rootx(), sf.winfo_rooty()
+                            w2, h = sf.winfo_width(), sf.winfo_height()
+                            if x <= event.x_root <= x + w2 and y <= event.y_root <= y + h:
+                                target = sf
+                                break
+                    except Exception:
+                        continue
+            
+            if target is None:
+                return
+            
+            delta = event.delta
+            if sys.platform == 'darwin':
+                if delta != 0:
+                    amount = -int(math.copysign(max(1, abs(delta * 3.0)), delta))
+                    target.canvas.yview_scroll(amount, 'units')
+            else:
+                if event.num == 4:
+                    target.canvas.yview_scroll(-3, 'units')
+                elif event.num == 5:
+                    target.canvas.yview_scroll(3, 'units')
+                else:
+                    target.canvas.yview_scroll(int(-1 * (delta / 120)), 'units')
+        except Exception:
+            pass
+    
+    def destroy(self):
+        if self in ScrollableFrame._active_instances:
+            ScrollableFrame._active_instances.remove(self)
+        super().destroy()
 
 
 # Sidebar Button for Modern UI layout
@@ -524,9 +591,10 @@ class LuaToolsHelperApp:
     def __init__(self, root):
         self.root = root
         self.root.title("LuaTools macOS Helper")
-        self.root.geometry("900x580")
+        self.root.geometry("900x700")
         self.root.configure(bg=CAT_BASE)
-        self.root.resizable(False, False)
+        self.root.minsize(900, 580)
+        self.root.resizable(False, True)
         
         # Apply Glassmorphism alpha
         try:
@@ -746,6 +814,48 @@ class LuaToolsHelperApp:
         except Exception as e:
             print(f"Error scanning steamapps: {e}")
 
+        # Scan steamapps/common/ folders (manual/cracked/imported installations)
+        common_dir = os.path.join(steamapps_dir, "common")
+        if os.path.exists(common_dir):
+            COMMON_FOLDER_MAPPING = {
+                "007 First Light": (3768760, "007 First Light"),
+                "FC 26": (3405690, "EA SPORTS FC™ 26"),
+                "ForzaHorizon6": (2483190, "Forza Horizon 6"),
+                "Horizon Forbidden West Complete Edition": (2420110, "Horizon Forbidden West™ Complete Edition"),
+                "Marvel's Spider-Man 2": (2651280, "Marvel's Spider-Man 2"),
+                "Marvel's Spider-Man Miles Morales": (1817190, "Marvel's Spider-Man: Miles Morales"),
+                "Subnautica": (264710, "Subnautica")
+            }
+            try:
+                for folder in os.listdir(common_dir):
+                    folder_path = os.path.join(common_dir, folder)
+                    if not os.path.isdir(folder_path):
+                        continue
+                    if folder in COMMON_FOLDER_MAPPING:
+                        appid, name = COMMON_FOLDER_MAPPING[folder]
+                        self.installed_games[appid] = name
+                        self.game_name_to_appid[name] = appid
+                    elif folder not in ["Steam Controller Configs", "Steamworks Shared"]:
+                        # Check steam_appid.txt
+                        txt_path = os.path.join(folder_path, "steam_appid.txt")
+                        if not os.path.exists(txt_path):
+                            for root_d, _, files in os.walk(folder_path):
+                                if "steam_appid.txt" in files:
+                                    txt_path = os.path.join(root_d, "steam_appid.txt")
+                                    break
+                        if os.path.exists(txt_path):
+                            try:
+                                with open(txt_path, "r") as tf:
+                                    txt_id = tf.read().strip()
+                                    if txt_id.isdigit():
+                                        appid = int(txt_id)
+                                        self.installed_games[appid] = folder
+                                        self.game_name_to_appid[folder] = appid
+                            except Exception:
+                                pass
+            except Exception as e:
+                print(f"Error scanning common folders: {e}")
+
     def parse_acf_file(self, filepath):
         try:
             appid = None
@@ -916,49 +1026,7 @@ class LuaToolsHelperApp:
         self.refresh_lists_and_dropdown()
         messagebox.showinfo("Refreshed", "Steam activity log and store history scanned successfully!")
 
-    def bind_scroll_recursive(self, widget, handler):
-        widget.bind("<MouseWheel>", handler)
-        widget.bind("<Button-4>", handler)
-        widget.bind("<Button-5>", handler)
-        for child in widget.winfo_children():
-            self.bind_scroll_recursive(child, handler)
-
-    def _on_patches_mousewheel(self, event):
-        try:
-            delta = event.delta
-            if sys.platform == "darwin":
-                # Prevent decimal rounding truncation (floats under 1.0 freezing the canvas)
-                import math
-                if delta != 0:
-                    amount = -int(math.copysign(max(1, abs(delta * 2.0)), delta))
-                    self.scroll_frame.canvas.yview_scroll(amount, "units")
-            else:
-                if event.num == 4:
-                    self.scroll_frame.canvas.yview_scroll(-1, "units")
-                elif event.num == 5:
-                    self.scroll_frame.canvas.yview_scroll(1, "units")
-                else:
-                    self.scroll_frame.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
-        except Exception:
-            pass
-
-    def _on_apis_mousewheel(self, event):
-        try:
-            delta = event.delta
-            if sys.platform == "darwin":
-                import math
-                if delta != 0:
-                    amount = -int(math.copysign(max(1, abs(delta * 2.0)), delta))
-                    self.apis_scroll_frame.canvas.yview_scroll(amount, "units")
-            else:
-                if event.num == 4:
-                    self.apis_scroll_frame.canvas.yview_scroll(-1, "units")
-                elif event.num == 5:
-                    self.apis_scroll_frame.canvas.yview_scroll(1, "units")
-                else:
-                    self.apis_scroll_frame.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
-        except Exception:
-            pass
+    # Scroll binding is now handled inside ScrollableFrame itself via Enter/Leave
 
     # ── TAB 2: MANAGE PATCHES VIEW ──
     def render_patches(self):
@@ -1007,9 +1075,39 @@ class LuaToolsHelperApp:
         
         self.refresh_installed_list()
 
+    def build_depot_parent_map(self):
+        """Parse all lua files to build a depot_id -> parent_app_id mapping."""
+        self._depot_to_parent = {}
+        st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
+        if not os.path.exists(st_plug_dir):
+            return
+        try:
+            for file in os.listdir(st_plug_dir):
+                if file.endswith(".lua") or file.endswith(".lua.disabled"):
+                    clean_id = file.replace(".lua.disabled", "").replace(".lua", "")
+                    if not clean_id.isdigit():
+                        continue
+                    parent_id = int(clean_id)
+                    filepath = os.path.join(st_plug_dir, file)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                            for line in f:
+                                match = re.search(r'addappid\s*\(\s*(\d+)', line)
+                                if match:
+                                    depot_id = int(match.group(1))
+                                    self._depot_to_parent[depot_id] = parent_id
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def get_parent_id(self, appid_val):
         """Finds the main parent game App ID for a given depot/manifest App ID."""
-        # 1. Collect known main App IDs from settings and directories
+        # 1. Check depot→parent map built from lua files
+        if hasattr(self, '_depot_to_parent') and appid_val in self._depot_to_parent:
+            return self._depot_to_parent[appid_val]
+        
+        # 2. Collect known main App IDs from installed games and lua filenames
         known_mains = set()
         for appid in self.installed_games:
             known_mains.add(int(appid))
@@ -1025,21 +1123,24 @@ class LuaToolsHelperApp:
             except Exception:
                 pass
                 
-        # 2. Check if this ID is already a main
+        # 3. Check if this ID is already a main
         if appid_val in known_mains:
             return appid_val
             
-        # Check nearby IDs (within a diff of 10)
+        # 4. Check nearby IDs (within a diff of 10)
         for diff in range(1, 10):
             if (appid_val - diff) in known_mains:
                 return appid_val - diff
                 
-        # Fallback: Group to nearest multiple of 10
+        # 5. Fallback: Group to nearest multiple of 10
         return (appid_val // 10) * 10
 
     def refresh_installed_list(self):
         if not hasattr(self, 'scroll_frame'):
             return
+        
+        # Build depot→parent mapping from lua files before grouping
+        self.build_depot_parent_map()
             
         self.name_labels.clear()
         
@@ -1181,11 +1282,10 @@ class LuaToolsHelperApp:
         # Manually force Tkinter idle layout updates and recalculate final scrollregion
         self.scroll_frame.scrollable_frame.update_idletasks()
         self.scroll_frame.canvas.configure(
-            scrollregion=(0, 0, self.scroll_frame.scrollable_frame.winfo_reqwidth(), self.scroll_frame.scrollable_frame.winfo_reqheight())
+            scrollregion=self.scroll_frame.canvas.bbox("all")
         )
                 
         # Recursively bind scroll wheel to the canvas and all dynamically generated child widgets
-        self.bind_scroll_recursive(self.scroll_frame, self._on_patches_mousewheel)
 
     def toggle_patch_direct(self, parent_id, current_active_state):
         st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
@@ -1635,7 +1735,6 @@ class LuaToolsHelperApp:
             lbl_url.pack(anchor=tk.W, pady=(0, 5))
             
         self.apis_scroll_frame = scr
-        self.bind_scroll_recursive(self.apis_scroll_frame, self._on_apis_mousewheel)
 
     def toggle_api(self, index, val):
         self.apis[index]["enabled"] = val

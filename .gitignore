@@ -4,10 +4,25 @@ dist/
 build/
 venv_build/
 *.exe
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
 
 # Temporary files & logs
 *.log
 luatools_temp/
+console.log
+console_system_python.log
+console_unbuffered.log
+run.log
+run2.log
 
 # System files
 .DS_Store
+
+# Test scripts
+test_*.py
+current_desktop.png
