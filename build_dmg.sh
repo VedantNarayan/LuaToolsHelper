@@ -19,7 +19,7 @@ echo "=== 4. Compiling Python script to macOS App Bundle ==="
 pyinstaller \
     --windowed \
     --name="LuaToolsHelper" \
-    --icon="icon-windowed.icns" \
+    --icon="AppIcon.icns" \
     --onedir \
     --clean \
     --noconfirm \
