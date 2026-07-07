@@ -1,7 +1,7 @@
 # LuaTools macOS Helper
 
 <p align="center">
-  <img src="icon-windowed.png" width="140" height="140" alt="LuaToolsHelper Logo">
+  <img src="AppIcon.png" width="140" height="140" alt="LuaToolsHelper Logo">
 </p>
 
 <p align="center">
