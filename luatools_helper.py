@@ -53,6 +53,9 @@ STATE_MANAGE = 4
 # Globally cached images (to prevent garbage collection in Tkinter!)
 TK_IMAGE_CACHE = {}
 
+# Beautiful dark purple geometric placeholder (120x45) when app/capsule returns 404
+BASE64_PLACEHOLDER = 'R0lGODdheAAtAIUAAFim/0VHWjAxTS8wTC4vSy4vSi4uSS0uSS0uSCwtRywtRissRissRSsrRCorRCoqQykqQikqQSgpQSgpQCgoPycoPicnPiYnPSYmPCYmOyUmOyUlOiQlOSQkOSMkOCMjNyMjNiIiNiIiNSEiNCEhMyAhMyAgMiAgMR8fMB4eLx4eLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwAAAAAeAAtAEAI/wADCBxIsKDBgwgTKlzIsKHDhwFISJxIsaLFixgzatzIsaPHjgI5iBxJsqTJkyhTmgQAQOVIli5jypwpkILNmzhz6tzJsydOljcBqBhKlCiAoEd9Kl3KlIJABlCjSp1KtarVq1gZsNzKciqArGDDhhVIoKzZs2jTql3Ltq3bt3DjwhWIoq7du3jz6t3Lt6/fv4ADAxYIorDhw4gTK17MGDEAx1xZNp5MuTJjgRgya97MubPnz6A3s9QstGhRAKRRh17NujUGgRBiy55Nu7bt27hrs8wtezfv38CBC0RAvLjx48iTK1/OvLnz59CfQ5xOtbr16wtTaN/Ovbv37+DDi/8fT768+fICTahfz769+/fw48ufT7++/foCRejfz7+///8ABijgfiwNaOCBCAIokAcMNujggxBGKOGED0bGUoUWUqjhhhw2KJAGIIYo4ogklmjiiSOyJGJpRq0IAIowxihjiAJZYOONOOao44489mhBZDeyaJoKAATJlY9IJpmkQBI06eSTUEYp5ZRUQsnSk0ISiSUAVXbp5ZdOCuTAmGSWaeaZaKapppkWAsCmhWvGKeecZAqkwJ145qnnnnz26eefebIE6KCEFsqnQAYkquiijDbq6KOQRirppJRWSqlAA2Sq6aacdurpp6CGKuqopJZKqkBDpqrqqqy26uqrsMb/+ipdgtVq66245vqXQCf06uuvwAYr7LDEFmvsscgmi6xAJTTr7LPQRivttNRWa+212GaLrUAjdOvtt+CGK+645JbrLUvmpqvuuuMKFMK78MYr77z01mvvvfCyhO++/PZbr0AfBCzwwAQXbPDBCA+8VcBtcsVwwhBHLPHAAnVg8cUYZ6zxxhx3rDFXHYPs8cgkl3yxQBukrPLKLLfs8ssws7zVypHRzFLMOOess8oCZeDzz0AHLfTQRBcN9FY/ZzkUAEmzZPTTUEfts0AXVG311VhnrfXWXF8QmdVKGwU2AF2XbfbZVQtUwdpst+3223DHLXfbLLEd9tJ2czX33nzz5S3QBIAHLvjghBdu+OGCbxV42AAszhLikEcuOeACRWD55ZhnrvnmnHee+VaYRxY6S56Xbvrplwv0wOqst+7667DHLvvrXMle++y456476wI14PvvwAcv/PDEFy88AL43vFXyLBnv/PPQ+y7QAtRXb/312Gev/fbcW89S9+CHL372AiVg/vnop6/++uy37z76LL0v//z0ry/QAfjnr//+/Pfv//8ADKAAB0jAAQqkAAhMoAIXyMAGOvCBEIygBCdIwQliylQYzKAGN8jBUQlEACAMoQhHSMISmvCEKEyhClfIwhUGICAAOw=='
+
 def get_game_image(appid):
     """Downloads game capsule from Steam CDN, converts to GIF using sips, and returns the path to the GIF."""
     cache_dir = os.path.join(DEFAULT_TEMP_DIR, "image_cache")
@@ -509,8 +512,7 @@ class LuaToolsHelperApp:
             
         def worker():
             gif_path = get_game_image(appid)
-            if gif_path and os.path.exists(gif_path):
-                self.root.after(0, lambda: self.create_and_cache_photoimage(appid, gif_path, callback))
+            self.root.after(0, lambda: self.create_and_cache_photoimage(appid, gif_path, callback))
         threading.Thread(target=worker, daemon=True).start()
 
     def load_game_image_thumb_async(self, appid, callback):
@@ -521,13 +523,15 @@ class LuaToolsHelperApp:
             
         def worker():
             gif_path = get_game_image_thumbnail(appid)
-            if gif_path and os.path.exists(gif_path):
-                self.root.after(0, lambda: self.create_and_cache_photoimage(cache_key, gif_path, callback))
+            self.root.after(0, lambda: self.create_and_cache_photoimage(cache_key, gif_path, callback))
         threading.Thread(target=worker, daemon=True).start()
 
     def create_and_cache_photoimage(self, cache_key, gif_path, callback):
         try:
-            img = tk.PhotoImage(file=gif_path)
+            if gif_path and os.path.exists(gif_path):
+                img = tk.PhotoImage(file=gif_path)
+            else:
+                img = tk.PhotoImage(data=BASE64_PLACEHOLDER)
             TK_IMAGE_CACHE[cache_key] = img
             callback(img)
         except Exception as e:
@@ -793,30 +797,38 @@ class LuaToolsHelperApp:
 
     def _on_patches_mousewheel(self, event):
         try:
+            delta = event.delta
             if sys.platform == "darwin":
-                # Precise macOS trackpad velocity scroll
-                self.scroll_frame.canvas.yview_scroll(int(-2 * event.delta), "units")
+                # Prevent decimal rounding truncation (floats under 1.0 freezing the canvas)
+                import math
+                if delta != 0:
+                    amount = -int(math.copysign(max(1, abs(delta * 2.0)), delta))
+                    self.scroll_frame.canvas.yview_scroll(amount, "units")
             else:
                 if event.num == 4:
                     self.scroll_frame.canvas.yview_scroll(-1, "units")
                 elif event.num == 5:
                     self.scroll_frame.canvas.yview_scroll(1, "units")
                 else:
-                    self.scroll_frame.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    self.scroll_frame.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
         except Exception:
             pass
 
     def _on_apis_mousewheel(self, event):
         try:
+            delta = event.delta
             if sys.platform == "darwin":
-                self.apis_scroll_frame.canvas.yview_scroll(int(-2 * event.delta), "units")
+                import math
+                if delta != 0:
+                    amount = -int(math.copysign(max(1, abs(delta * 2.0)), delta))
+                    self.apis_scroll_frame.canvas.yview_scroll(amount, "units")
             else:
                 if event.num == 4:
                     self.apis_scroll_frame.canvas.yview_scroll(-1, "units")
                 elif event.num == 5:
                     self.apis_scroll_frame.canvas.yview_scroll(1, "units")
                 else:
-                    self.apis_scroll_frame.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    self.apis_scroll_frame.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
         except Exception:
             pass
 
