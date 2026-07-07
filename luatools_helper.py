@@ -413,11 +413,6 @@ class LuaToolsHelperApp:
         self.load_apis()
         self.scan_installed_games()
         
-        # Global scroll wheel bindings for smooth scrolling on macOS
-        self.root.bind_all("<MouseWheel>", self._on_global_mousewheel)
-        self.root.bind_all("<Button-4>", self._on_global_mousewheel)
-        self.root.bind_all("<Button-5>", self._on_global_mousewheel)
-        
         # ── SIDEBAR NAVIGATION PANEL ──
         self.sidebar_frame = tk.Frame(self.root, bg=CAT_CRUST, width=200)
         self.sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
@@ -633,20 +628,34 @@ class LuaToolsHelperApp:
         self.status_lbl = tk.Label(status_bar, text="Steam Activity Monitor: Waiting for pages...", font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_CRUST)
         self.status_lbl.pack(side=tk.LEFT)
 
-        # Scanned Cart & Store Dropdown section
+        # Scanned Cart & Store Dropdown section with prominent Refresh button
         scanned_header = tk.Frame(self.content_frame, bg=CAT_BASE)
         scanned_header.pack(fill=tk.X, pady=(5, 3))
         
         scanned_lbl = tk.Label(scanned_header, text="Recently Viewed & Cart Games:", font=("Helvetica", 11, "bold"), fg=CAT_SUBTEXT0, bg=CAT_BASE)
         scanned_lbl.pack(side=tk.LEFT)
         
-        # Manual refresh button for activity
-        btn_refresh_act = LabelButton(scanned_header, text="🔄 Refresh", command=self.manual_refresh_dashboard, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 9, "bold"), pady=2, padx=8, outlined=True)
-        btn_refresh_act.pack(side=tk.RIGHT)
+        dropdown_row = tk.Frame(self.content_frame, bg=CAT_BASE)
+        dropdown_row.pack(fill=tk.X, pady=5)
         
         detected_options = self.get_scanned_dropdown_options()
-        self.scanned_dropdown = TkDropdown(self.content_frame, detected_options, self.on_dropdown_game_selected)
-        self.scanned_dropdown.frame.pack(fill=tk.X, pady=2)
+        self.scanned_dropdown = TkDropdown(dropdown_row, detected_options, self.on_dropdown_game_selected)
+        self.scanned_dropdown.frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        
+        # Highly visible solid blue refresh button
+        self.btn_refresh_dashboard = LabelButton(
+            dropdown_row, 
+            text="🔄 Scan Activity", 
+            command=self.manual_refresh_dashboard, 
+            bg=CAT_BLUE, 
+            fg="#0e1621",
+            hover_bg="#8ad4f8",
+            active_bg="#4fc3f7",
+            font=("Helvetica", 10, "bold"),
+            pady=6,
+            padx=15
+        )
+        self.btn_refresh_dashboard.pack(side=tk.RIGHT)
         
         # Display Area Card (Glassmorphic)
         self.game_card = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0, height=180)
@@ -711,51 +720,52 @@ class LuaToolsHelperApp:
             self.game_card_img.configure(image="")
 
     def manual_refresh_dashboard(self):
-        # Force check log files and history db
+        # Force check all historical lines from the beginning of log file
+        self.cef_log_position = 0
         self.check_cef_logs()
         self.check_history_db()
         
-        # Rescan steam activity options
+        # Rescan steam activity options and keep dropdown synced
         detected_options = self.get_scanned_dropdown_options()
         if hasattr(self, 'scanned_dropdown'):
             self.scanned_dropdown.update_options(detected_options)
             self.scanned_dropdown.set(detected_options[0])
             self.on_dropdown_game_selected(detected_options[0])
-        messagebox.showinfo("Refreshed", "Steam activity log and store history scanned successfully!")
+        messagebox.showinfo("Refreshed", "Steam activity log and store history fully scanned successfully!")
 
-    def _on_global_mousewheel(self, event):
+    def bind_scroll_recursive(self, widget, handler):
+        widget.bind("<MouseWheel>", handler)
+        widget.bind("<Button-4>", handler)
+        widget.bind("<Button-5>", handler)
+        for child in widget.winfo_children():
+            self.bind_scroll_recursive(child, handler)
+
+    def _on_patches_mousewheel(self, event):
         try:
-            # Find the widget under the mouse cursor
-            widget = self.root.winfo_containing(event.x_root, event.y_root)
-            if not widget:
-                return
-                
-            # Traverse parent tree to find target canvas
-            curr = widget
-            canvas = None
-            while curr:
-                if isinstance(curr, tk.Canvas):
-                    canvas = curr
-                    break
-                parent = curr.winfo_parent()
-                if not parent:
-                    break
-                try:
-                    curr = self.root.nametowidget(parent)
-                except Exception:
-                    break
-                    
-            if canvas:
-                if sys.platform == "darwin":
-                    # Fast responsive scroll multiplier for macOS
-                    canvas.yview_scroll(int(-3 * event.delta), "units")
+            if sys.platform == "darwin":
+                # Precise macOS trackpad velocity scroll
+                self.scroll_frame.canvas.yview_scroll(int(-2 * event.delta), "units")
+            else:
+                if event.num == 4:
+                    self.scroll_frame.canvas.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    self.scroll_frame.canvas.yview_scroll(1, "units")
                 else:
-                    if event.num == 4:
-                        canvas.yview_scroll(-1, "units")
-                    elif event.num == 5:
-                        canvas.yview_scroll(1, "units")
-                    else:
-                        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    self.scroll_frame.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _on_apis_mousewheel(self, event):
+        try:
+            if sys.platform == "darwin":
+                self.apis_scroll_frame.canvas.yview_scroll(int(-2 * event.delta), "units")
+            else:
+                if event.num == 4:
+                    self.apis_scroll_frame.canvas.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    self.apis_scroll_frame.canvas.yview_scroll(1, "units")
+                else:
+                    self.apis_scroll_frame.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         except Exception:
             pass
 
@@ -767,8 +777,19 @@ class LuaToolsHelperApp:
         title_lbl = tk.Label(title_frame, text="Manage Installed Patches", font=("Helvetica", 14, "bold"), fg=CAT_BLUE, bg=CAT_BASE)
         title_lbl.pack(side=tk.LEFT)
         
-        # Manual refresh button
-        btn_refresh = LabelButton(title_frame, text="🔄 Refresh", command=self.refresh_installed_list, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 9, "bold"), pady=4, padx=8, outlined=True)
+        # Highly visible solid blue refresh button
+        btn_refresh = LabelButton(
+            title_frame, 
+            text="🔄 Refresh List", 
+            command=self.refresh_installed_list, 
+            bg=CAT_BLUE, 
+            fg="#0e1621",
+            hover_bg="#8ad4f8",
+            active_bg="#4fc3f7",
+            font=("Helvetica", 9, "bold"),
+            pady=4,
+            padx=12
+        )
         btn_refresh.pack(side=tk.RIGHT)
         
         list_container = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
@@ -935,6 +956,9 @@ class LuaToolsHelperApp:
             
             if game_name.startswith("Game "):
                 self.resolve_game_name(parent_id)
+                
+        # Recursively bind scroll wheel to the canvas and all dynamically generated child widgets
+        self.bind_scroll_recursive(self.scroll_frame, self._on_patches_mousewheel)
 
     def toggle_patch_direct(self, parent_id, current_active_state):
         st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
@@ -1154,6 +1178,9 @@ class LuaToolsHelperApp:
                 
             lbl_url = tk.Label(info, text=display_url, font=("Helvetica", 9), fg=CAT_SUBTEXT0, bg=CAT_MANTLE, anchor="w")
             lbl_url.pack(anchor=tk.W, pady=(0, 5))
+            
+        self.apis_scroll_frame = scr
+        self.bind_scroll_recursive(self.apis_scroll_frame, self._on_apis_mousewheel)
 
     def toggle_api(self, index, val):
         self.apis[index]["enabled"] = val
@@ -1662,11 +1689,30 @@ class LuaToolsHelperApp:
 
     def refresh_lists_and_dropdown(self):
         if self.current_tab == "dashboard":
-            selected_idx = self.scanned_dropdown.options.index(self.scanned_dropdown.get()) if self.scanned_dropdown.get() in self.scanned_dropdown.options else 0
+            # Save currently selected App ID
+            current_opt = self.scanned_dropdown.get()
+            current_appid = 0
+            match = re.search(r'App ID: (\d+)', current_opt)
+            if match:
+                current_appid = int(match.group(1))
+                
             opts = self.get_scanned_dropdown_options()
             self.scanned_dropdown.update_options(opts)
-            if selected_idx < len(opts):
-                self.scanned_dropdown.set(opts[selected_idx])
+            
+            # Find the option matching the saved App ID
+            matching_opt = None
+            for opt in opts:
+                if f"App ID: {current_appid}" in opt:
+                    matching_opt = opt
+                    break
+                    
+            if matching_opt:
+                self.scanned_dropdown.set(matching_opt)
+                # Keep active card details in sync
+                self.on_dropdown_game_selected(matching_opt)
+            else:
+                self.scanned_dropdown.set(opts[0])
+                self.on_dropdown_game_selected(opts[0])
 
 
 if __name__ == "__main__":
