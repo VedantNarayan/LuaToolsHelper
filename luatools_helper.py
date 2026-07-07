@@ -303,14 +303,31 @@ class ScrollableFrame(tk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         
         self.canvas.bind('<Configure>', self._on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
+        # Local bind on mouse entry/leave to prevent conflicts and flickering
+        self.canvas.bind('<Enter>', self._bind_mousewheel)
+        self.canvas.bind('<Leave>', self._unbind_mousewheel)
         
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
         
+    def _bind_mousewheel(self, event):
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+        
+    def _unbind_mousewheel(self, event):
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+        
     def _on_mousewheel(self, event):
         try:
-            self.canvas.yview_scroll(int(-1 * (event.delta)), "units")
+            if sys.platform == "darwin":
+                # Scroll speed multiplier on macOS (event.delta is typically +/- 1 or small fractional values on macOS)
+                self.canvas.yview_scroll(int(-3 * event.delta), "units")
+            else:
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         except Exception:
             pass
 
@@ -385,6 +402,7 @@ class LuaToolsHelperApp:
         self.installed_games = {} # appid -> name
         self.game_name_to_appid = {} # name -> appid
         self.game_name_cache = {} # appid -> name
+        self.name_labels = {} # appid -> label reference to update names without flickering
         
         # Scanner states
         self.active_running_appid = 0
@@ -740,6 +758,8 @@ class LuaToolsHelperApp:
         if not hasattr(self, 'scroll_frame'):
             return
             
+        self.name_labels.clear()
+        
         for widget in self.scroll_frame.scrollable_frame.winfo_children():
             widget.destroy()
             
@@ -835,6 +855,7 @@ class LuaToolsHelperApp:
             
             name_lbl = tk.Label(info_frame, text=game_name, font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_BASE, anchor="w")
             name_lbl.pack(anchor=tk.W, pady=(5, 0))
+            self.name_labels[parent_id] = name_lbl
             
             status_color = CAT_GREEN if is_active else CAT_SUBTEXT0
             sub_lbl = tk.Label(info_frame, text=f"App ID: {parent_id} | {status_indicator}", font=("Helvetica", 9), fg=status_color, bg=CAT_BASE, anchor="w")
@@ -1578,7 +1599,9 @@ class LuaToolsHelperApp:
                 if str(appid) in data and data[str(appid)].get('success'):
                     game_name = data[str(appid)]['data'].get('name', f"Game {appid}")
                     self.game_name_cache[appid] = game_name
-                    self.root.after(0, self.refresh_lists_and_dropdown)
+                    # Update name label directly in UI
+                    if appid in self.name_labels and self.name_labels[appid].winfo_exists():
+                        self.root.after(0, lambda: self.name_labels[appid].configure(text=game_name))
         except Exception:
             pass
 
@@ -1589,8 +1612,6 @@ class LuaToolsHelperApp:
             self.scanned_dropdown.update_options(opts)
             if selected_idx < len(opts):
                 self.scanned_dropdown.set(opts[selected_idx])
-        elif self.current_tab == "patches":
-            self.refresh_installed_list()
 
 
 if __name__ == "__main__":
