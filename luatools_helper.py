@@ -327,15 +327,15 @@ class ScrollableFrame(tk.Frame):
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(
-                scrollregion=self.canvas.bbox("all")
+                scrollregion=(0, 0, self.scrollable_frame.winfo_reqwidth(), self.scrollable_frame.winfo_reqheight())
             )
         )
         
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
-        # Pack scrollbar first to avoid overlapping with canvas
-        self.scrollbar.pack(side="right", fill="y")
+        # Pack scrollbar with horizontal padding to prevent cramped styling
+        self.scrollbar.pack(side="right", fill="y", padx=(5, 2))
         self.canvas.pack(side="left", fill="both", expand=True)
         
         self.canvas.bind('<Configure>', self._on_canvas_configure)
@@ -977,9 +977,14 @@ class LuaToolsHelperApp:
             card = tk.Frame(self.scroll_frame.scrollable_frame, bg=CAT_BASE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
             card.pack(fill=tk.X, pady=5, padx=5)
             
+            # Use Grid layout inside the card for perfect vertical centering
+            card.columnconfigure(0, weight=0) # Capsule Image
+            card.columnconfigure(1, weight=1) # Details text (stretches to fill middle)
+            card.columnconfigure(2, weight=0) # Action buttons
+            
             # Left: Game Capsule Image pixel wrapper (120x45)
             img_container = tk.Frame(card, bg=CAT_BASE, width=120, height=45)
-            img_container.pack(side=tk.LEFT, padx=10, pady=8)
+            img_container.grid(row=0, column=0, padx=10, pady=10, sticky="w")
             img_container.pack_propagate(False)
             
             img_lbl = tk.Label(img_container, bg=CAT_BASE)
@@ -988,21 +993,22 @@ class LuaToolsHelperApp:
             # Load the thumbnail image asynchronously
             self.load_game_image_thumb_async(parent_id, lambda img, l=img_lbl: l.configure(image=img) if l.winfo_exists() else None)
             
-            # Center: Title & App ID
+            # Center: Title & App ID (centered vertically automatically by grid)
             info_frame = tk.Frame(card, bg=CAT_BASE)
-            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=10)
+            info_frame.pack_propagate(True)
+            info_frame.grid(row=0, column=1, padx=10, sticky="w")
             
             name_lbl = tk.Label(info_frame, text=game_name, font=("Helvetica", 11, "bold"), fg=CAT_TEXT, bg=CAT_BASE, anchor="w")
-            name_lbl.pack(anchor=tk.W, pady=(5, 0))
+            name_lbl.pack(anchor=tk.W)
             self.name_labels[parent_id] = name_lbl
             
             status_color = CAT_GREEN if is_active else CAT_SUBTEXT0
             sub_lbl = tk.Label(info_frame, text=f"App ID: {parent_id} | {status_indicator}", font=("Helvetica", 9), fg=status_color, bg=CAT_BASE, anchor="w")
-            sub_lbl.pack(anchor=tk.W, pady=(0, 5))
+            sub_lbl.pack(anchor=tk.W)
             
             # Right: Action Buttons
             btn_frame = tk.Frame(card, bg=CAT_BASE)
-            btn_frame.pack(side=tk.RIGHT, padx=10)
+            btn_frame.grid(row=0, column=2, padx=10, sticky="e")
             
             # Action hooks
             toggle_action = lambda p=parent_id, act=is_active: self.toggle_patch_direct(p, act)
@@ -1019,6 +1025,16 @@ class LuaToolsHelperApp:
             
             if game_name.startswith("Game "):
                 self.resolve_game_name(parent_id)
+                
+        # Add bottom spacing label to prevent clipping of final list item
+        spacing_lbl = tk.Label(self.scroll_frame.scrollable_frame, bg=CAT_MANTLE, height=2)
+        spacing_lbl.pack(fill=tk.X)
+        
+        # Manually force Tkinter idle layout updates and recalculate final scrollregion
+        self.scroll_frame.scrollable_frame.update_idletasks()
+        self.scroll_frame.canvas.configure(
+            scrollregion=(0, 0, self.scroll_frame.scrollable_frame.winfo_reqwidth(), self.scroll_frame.scrollable_frame.winfo_reqheight())
+        )
                 
         # Recursively bind scroll wheel to the canvas and all dynamically generated child widgets
         self.bind_scroll_recursive(self.scroll_frame, self._on_patches_mousewheel)
