@@ -68,17 +68,55 @@ def get_game_image(appid):
     jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
     if not os.path.exists(jpg_path):
         url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
+        download_success = False
+        import uuid
+        temp_jpg = os.path.join(cache_dir, f"{appid}_{uuid.uuid4().hex}.jpg")
+        
         try:
             req = urllib.request.Request(url)
             req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
             req.add_header('Accept-Language', 'en-US,en;q=0.9')
             
-            with urllib.request.urlopen(req, timeout=5) as response:
-                with open(jpg_path, "wb") as f:
+            with urllib.request.urlopen(req, timeout=3) as response:
+                with open(temp_jpg, "wb") as f:
                     f.write(response.read())
-        except Exception as e:
-            print(f"Error downloading image for {appid}: {e}")
+            download_success = True
+        except Exception:
+            pass
+            
+        # Fallback to Steam App Details API for hashed/seasonal app URLs
+        if not download_success:
+            try:
+                api_url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+                api_req = urllib.request.Request(api_url)
+                api_req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
+                with urllib.request.urlopen(api_req, timeout=3) as api_res:
+                    res_data = json.loads(api_res.read().decode('utf-8', errors='ignore'))
+                    if res_data and res_data.get(str(appid), {}).get("success"):
+                        app_info = res_data[str(appid)]["data"]
+                        img_url = app_info.get("capsule_imagev5") or app_info.get("capsule_image") or app_info.get("header_image")
+                        if img_url:
+                            req_fallback = urllib.request.Request(img_url)
+                            req_fallback.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
+                            with urllib.request.urlopen(req_fallback, timeout=3) as fb_res:
+                                with open(temp_jpg, "wb") as f:
+                                    f.write(fb_res.read())
+                                download_success = True
+            except Exception as e:
+                print(f"Fallback fetch failed for {appid}: {e}")
+                
+        if download_success and os.path.exists(temp_jpg):
+            try:
+                os.rename(temp_jpg, jpg_path)
+            except Exception:
+                pass
+        else:
+            if os.path.exists(temp_jpg):
+                try:
+                    os.remove(temp_jpg)
+                except Exception:
+                    pass
             return None
             
     # Convert to GIF using sips
@@ -109,26 +147,18 @@ def get_game_image_thumbnail(appid):
     if os.path.exists(gif_path):
         return gif_path
         
-    jpg_path = os.path.join(cache_dir, f"{appid}.jpg")
-    if not os.path.exists(jpg_path):
-        url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_184x69.jpg"
-        try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            req.add_header('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
-            req.add_header('Accept-Language', 'en-US,en;q=0.9')
-            
-            with urllib.request.urlopen(req, timeout=5) as response:
-                with open(jpg_path, "wb") as f:
-                    f.write(response.read())
-        except Exception as e:
-            print(f"Error downloading image for thumb {appid}: {e}")
-            return None
-            
+    full_gif = get_game_image(appid)
+    if not full_gif or not os.path.exists(full_gif):
+        return None
+        
     # Resize and convert to GIF using sips
-    import subprocess
-    subprocess.run(["sips", "-s", "format", "gif", "-z", "45", "120", jpg_path, "--out", gif_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return gif_path if os.path.exists(gif_path) else None
+    try:
+        import subprocess
+        subprocess.run(["sips", "-s", "format", "gif", "-z", "45", "120", full_gif, "--out", gif_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return gif_path if os.path.exists(gif_path) else None
+    except Exception as e:
+        print(f"Error converting thumb for {appid}: {e}")
+        return None
 
 
 # Custom Styled Label Button (tk.Button has severe color limitations on macOS)
@@ -403,6 +433,14 @@ class LuaToolsHelperApp:
                 self.cef_log_position = os.path.getsize(log_path)
         except Exception:
             self.cef_log_position = 0
+            
+        # Dynamic tailing of JS logs (webhelper_js.txt)
+        try:
+            js_log_path = os.path.join(self.steam_path, "logs/webhelper_js.txt")
+            if os.path.exists(js_log_path):
+                self.js_log_position = os.path.getsize(js_log_path)
+        except Exception:
+            self.js_log_position = 0
             
         # Animation & Flow state
         self.running = True
@@ -708,6 +746,10 @@ class LuaToolsHelperApp:
         self.on_dropdown_game_selected(detected_options[0])
 
     def set_selected_game(self, appid, name):
+        if hasattr(self, 'selected_appid') and self.selected_appid == appid:
+            # Prevent duplicate loader thread spawns for the same selected game
+            return
+            
         self.selected_appid = appid
         self.selected_name = name
         
@@ -1534,43 +1576,64 @@ class LuaToolsHelperApp:
     def steam_monitor_loop(self):
         while self.running:
             try:
-                time.sleep(0.5) # Fast 0.5s real-time scanning
+                time.sleep(0.2) # Fast 0.2s ultra real-time scanning
                 self.check_cef_logs()
                 self.check_history_db()
             except Exception as e:
                 print(f"Error in monitor thread: {e}")
 
     def check_cef_logs(self):
-        # Support both 'cef_log.txt' and 'cef.log' formats
+        # 1. Support both 'cef_log.txt' and 'cef.log' formats
         log_path = os.path.join(self.steam_path, "logs/cef_log.txt")
         if not os.path.exists(log_path):
             log_path = os.path.join(self.steam_path, "logs/cef.log")
-        if not os.path.exists(log_path):
-            return
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(0, 2)
-                size = f.tell()
-                if size < self.cef_log_position:
-                    self.cef_log_position = 0
-                f.seek(self.cef_log_position)
-                
-                lines = f.readlines()
-                self.cef_log_position = f.tell()
-                
-                for line in lines:
-                    match = re.search(r'store\.steampowered\.com/app/(\d+)', line)
-                    if match:
-                        appid = int(match.group(1))
-                        if appid == 228980: 
-                            continue
-                        name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
-                        if appid != self.last_detected_store_appid:
-                            self.last_detected_store_appid = appid
-                            self.last_detected_store_name = name
-                            self.root.after(0, lambda: self.handle_new_store_game_detected(appid, name))
-        except Exception:
-            pass
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    if size < self.cef_log_position:
+                        self.cef_log_position = 0
+                    f.seek(self.cef_log_position)
+                    
+                    lines = f.readlines()
+                    self.cef_log_position = f.tell()
+                    
+                    for line in lines:
+                        self.parse_log_line(line)
+            except Exception:
+                pass
+
+        # 2. Support 'webhelper_js.txt' for instant navigation log output
+        js_log_path = os.path.join(self.steam_path, "logs/webhelper_js.txt")
+        if os.path.exists(js_log_path):
+            try:
+                with open(js_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    if size < self.js_log_position:
+                        self.js_log_position = 0
+                    f.seek(self.js_log_position)
+                    
+                    lines = f.readlines()
+                    self.js_log_position = f.tell()
+                    
+                    for line in lines:
+                        self.parse_log_line(line)
+            except Exception:
+                pass
+
+    def parse_log_line(self, line):
+        match = re.search(r'store\.steampowered\.com/app/(\d+)', line)
+        if match:
+            appid = int(match.group(1))
+            if appid == 228980: 
+                return
+            name = self.installed_games.get(appid, self.game_name_cache.get(appid, f"Game {appid}"))
+            if appid != self.last_detected_store_appid:
+                self.last_detected_store_appid = appid
+                self.last_detected_store_name = name
+                self.root.after(0, lambda: self.handle_new_store_game_detected(appid, name))
 
     def check_history_db(self):
         bottle_root = os.path.dirname(os.path.dirname(os.path.dirname(self.steam_path)))
