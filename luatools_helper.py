@@ -255,13 +255,15 @@ class LabelButton(tk.Frame):
         self.label.configure(bg=self._inner_bg, fg=self._inner_fg, cursor="hand2")
 
 
-# Custom Dropdown menu using tk.Label + tk.Menu
+# Custom Dropdown menu using a modern custom Toplevel Scrollable & Searchable listbox
 class TkDropdown:
     def __init__(self, parent, options, callback, bg=CAT_SURFACE0, fg=CAT_TEXT):
+        self.parent = parent
         self.callback = callback
         self.options = options
         self.current_value = options[0] if options else ""
         self.state = "normal"
+        self.popup = None
         
         self.frame = tk.Frame(parent, bg=CAT_SURFACE0, highlightbackground=CAT_SURFACE1, highlightthickness=1, bd=0)
         
@@ -281,27 +283,153 @@ class TkDropdown:
         self.lbl.bind("<Enter>", lambda e: self.lbl.configure(bg=CAT_SURFACE1) if self.state == "normal" else None)
         self.lbl.bind("<Leave>", lambda e: self.lbl.configure(bg=bg) if self.state == "normal" else None)
         
-        self.menu = tk.Menu(parent, tearoff=0, bg=CAT_MANTLE, fg=CAT_TEXT, activebackground=CAT_BLUE, activeforeground=CAT_CRUST, font=("Helvetica", 11))
-        self.update_options(options)
-        
     def update_options(self, options):
         self.options = options
-        self.menu.delete(0, tk.END)
-        for opt in options:
-            self.menu.add_command(label=opt, command=lambda val=opt: self.select_option(val))
+        if self.current_value not in options and options:
+            self.set(options[0])
             
     def select_option(self, val):
-        self.current_value = val
-        self.lbl.configure(text=f"  {val}  ▼")
+        self.set(val)
+        self.hide_menu()
         self.callback(val)
         
+    def hide_menu(self):
+        if self.popup:
+            self.popup.destroy()
+            self.popup = None
+            
     def show_menu(self):
         if self.state == "disabled":
             return
+        if self.popup:
+            self.hide_menu()
+            return
+            
+        # Create a modern borderless popup window
+        self.popup = tk.Toplevel(self.frame)
+        self.popup.overrideredirect(True)
+        self.popup.configure(bg=CAT_CRUST)
+        
+        # Position popup exactly below the label
         x = self.lbl.winfo_rootx()
         y = self.lbl.winfo_rooty() + self.lbl.winfo_height()
-        self.menu.post(x, y)
+        w = self.lbl.winfo_width()
+        h = 250 # max height
+        self.popup.geometry(f"{w}x{h}+{x}+{y}")
         
+        # Focus out bindings to auto-dismiss
+        self.popup.bind("<FocusOut>", lambda e: self.hide_menu_delayed())
+        self.lbl.bind("<Configure>", lambda e: self.hide_menu())
+        
+        # Search Entry at top
+        search_frame = tk.Frame(self.popup, bg=CAT_CRUST, pady=4, padx=6)
+        search_frame.pack(fill=tk.X)
+        
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(
+            search_frame, 
+            textvariable=search_var, 
+            bg=CAT_MANTLE, 
+            fg=CAT_TEXT, 
+            insertbackground=CAT_TEXT,
+            relief="flat", 
+            font=("Helvetica", 10),
+            highlightthickness=1,
+            highlightbackground=CAT_SURFACE1,
+            highlightcolor=CAT_BLUE
+        )
+        search_entry.pack(fill=tk.X, ipady=3)
+        search_entry.focus_set()
+        
+        # Scrollable container for items
+        items_container = tk.Frame(self.popup, bg=CAT_CRUST)
+        items_container.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
+        
+        scroll_frame = ScrollableFrame(items_container, bg=CAT_CRUST)
+        scroll_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Function to populate list based on search filter
+        def populate_list(filter_text=""):
+            for child in scroll_frame.scrollable_frame.winfo_children():
+                child.destroy()
+                
+            filtered = [opt for opt in self.options if filter_text.lower() in opt.lower()]
+            if not filtered:
+                empty_lbl = tk.Label(scroll_frame.scrollable_frame, text="No matches found", bg=CAT_CRUST, fg=CAT_SUBTEXT0, font=("Helvetica", 10), pady=10)
+                empty_lbl.pack(fill=tk.X)
+                return
+                
+            for opt in filtered:
+                # Hoverable item label
+                item_lbl = tk.Label(
+                    scroll_frame.scrollable_frame, 
+                    text=f"  {opt}", 
+                    bg=CAT_CRUST, 
+                    fg=CAT_TEXT, 
+                    font=("Helvetica", 10), 
+                    anchor="w",
+                    pady=6,
+                    cursor="hand2"
+                )
+                item_lbl.pack(fill=tk.X)
+                
+                # Bindings
+                item_lbl.bind("<Button-1>", lambda e, val=opt: self.select_option(val))
+                item_lbl.bind("<Enter>", lambda e, lbl=item_lbl: lbl.configure(bg=CAT_SURFACE0))
+                item_lbl.bind("<Leave>", lambda e, lbl=item_lbl: lbl.configure(bg=CAT_CRUST))
+                
+            # Force layout updates and scroll region config
+            scroll_frame.scrollable_frame.update_idletasks()
+            scroll_frame.canvas.configure(
+                scrollregion=(0, 0, scroll_frame.scrollable_frame.winfo_reqwidth(), scroll_frame.scrollable_frame.winfo_reqheight())
+            )
+            
+        # Bind search key release
+        search_var.trace_add("write", lambda *args: populate_list(search_var.get()))
+        
+        # Initial populate
+        populate_list()
+        
+        # Recursive scroll wheel bindings for the popup items
+        def bind_scroll_recursive_local(widget, handler):
+            widget.bind("<MouseWheel>", handler)
+            widget.bind("<Button-4>", handler)
+            widget.bind("<Button-5>", handler)
+            for child in widget.winfo_children():
+                bind_scroll_recursive_local(child, handler)
+                
+        def on_popup_mousewheel(event):
+            try:
+                delta = event.delta
+                if sys.platform == "darwin":
+                    import math
+                    if delta != 0:
+                        amount = -int(math.copysign(max(1, abs(delta * 2.0)), delta))
+                        scroll_frame.canvas.yview_scroll(amount, "units")
+                else:
+                    if event.num == 4:
+                        scroll_frame.canvas.yview_scroll(-1, "units")
+                    elif event.num == 5:
+                        scroll_frame.canvas.yview_scroll(1, "units")
+                    else:
+                        scroll_frame.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+            except Exception:
+                pass
+                
+        bind_scroll_recursive_local(scroll_frame, on_popup_mousewheel)
+
+    def hide_menu_delayed(self):
+        # Small delay to allow button clicks to register before popup is destroyed
+        self.frame.after(150, self.hide_menu_check)
+        
+    def hide_menu_check(self):
+        if self.popup:
+            focused = self.frame.focus_get()
+            # If focus is still inside the popup, don't close it
+            if focused and (focused.winfo_toplevel() == self.popup):
+                return
+            self.hide_menu()
+            
     def get(self):
         return self.current_value
         
@@ -853,7 +981,23 @@ class LuaToolsHelperApp:
             pady=4,
             padx=12
         )
-        btn_refresh.pack(side=tk.RIGHT)
+        btn_refresh.pack(side=tk.RIGHT, padx=3)
+        
+        # New "Install Manually" button next to refresh
+        btn_install_manual = LabelButton(
+            title_frame, 
+            text="➕ Install Manually", 
+            command=self.install_patch_manually, 
+            bg=CAT_SURFACE0, 
+            fg=CAT_TEXT,
+            hover_bg="#45475a",
+            active_bg="#313244",
+            font=("Helvetica", 9, "bold"),
+            pady=4,
+            padx=12,
+            outlined=True
+        )
+        btn_install_manual.pack(side=tk.RIGHT, padx=3)
         
         list_container = tk.Frame(self.content_frame, bg=CAT_MANTLE, highlightbackground=CAT_SURFACE0, highlightthickness=1, bd=0)
         list_container.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -1012,10 +1156,14 @@ class LuaToolsHelperApp:
             
             # Action hooks
             toggle_action = lambda p=parent_id, act=is_active: self.toggle_patch_direct(p, act)
+            update_action = lambda p=parent_id: self.update_patch_options(p)
             delete_action = lambda p=parent_id: self.delete_patch_direct(p)
             
             btn_toggle = LabelButton(btn_frame, text="Toggle", command=toggle_action, bg=CAT_SURFACE0, fg=CAT_TEXT, font=("Helvetica", 9, "bold"), pady=3, padx=6, outlined=True)
             btn_toggle.pack(side=tk.LEFT, padx=3)
+            
+            btn_update = LabelButton(btn_frame, text="Update", command=update_action, bg=CAT_BLUE, fg="#0e1621", font=("Helvetica", 9, "bold"), pady=3, padx=6)
+            btn_update.pack(side=tk.LEFT, padx=3)
             
             btn_delete = LabelButton(btn_frame, text="Delete", command=delete_action, bg=CAT_RED, fg="#ffffff", font=("Helvetica", 9, "bold"), pady=3, padx=6)
             btn_delete.pack(side=tk.LEFT, padx=3)
@@ -1136,7 +1284,235 @@ class LuaToolsHelperApp:
                 pass
                 
         self.refresh_installed_list()
-        messagebox.showinfo("Deleted", f"Successfully removed all files for App ID {parent_id}.")
+
+    def install_patch_manually(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Patch / Manifest File",
+            filetypes=[
+                ("Supported Files", "*.manifest *.lua *.zip"),
+                ("Steam Manifests", "*.manifest"),
+                ("Lua Scripts", "*.lua"),
+                ("Zip Archives", "*.zip"),
+                ("All Files", "*.*")
+            ]
+        )
+        if not file_path:
+            return
+            
+        try:
+            st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
+            depot_cache = os.path.join(self.steam_path, "depotcache")
+            
+            os.makedirs(st_plug_dir, exist_ok=True)
+            os.makedirs(depot_cache, exist_ok=True)
+            
+            filename = os.path.basename(file_path)
+            
+            if filename.endswith(".manifest"):
+                dest = os.path.join(depot_cache, filename)
+                shutil.copy2(file_path, dest)
+                messagebox.showinfo("Success", f"Successfully installed manifest file:\n{filename}")
+                
+            elif filename.endswith(".lua"):
+                dest = os.path.join(st_plug_dir, filename)
+                shutil.copy2(file_path, dest)
+                messagebox.showinfo("Success", f"Successfully installed Lua script:\n{filename}")
+                
+            elif filename.endswith(".zip"):
+                extract_dir = os.path.join(self.temp_dir, f"manual_extract_{int(time.time())}")
+                os.makedirs(extract_dir, exist_ok=True)
+                
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                    
+                manifests_installed = 0
+                luas_installed = 0
+                
+                for root_dir, _, files in os.walk(extract_dir):
+                    for file in files:
+                        fp = os.path.join(root_dir, file)
+                        if file.endswith(".manifest"):
+                            clean_name = os.path.basename(file.replace('\\', '/'))
+                            shutil.copy2(fp, os.path.join(depot_cache, clean_name))
+                            manifests_installed += 1
+                        elif file.endswith(".lua"):
+                            clean_name = os.path.basename(file.replace('\\', '/'))
+                            shutil.copy2(fp, os.path.join(st_plug_dir, clean_name))
+                            luas_installed += 1
+                            
+                try:
+                    shutil.rmtree(extract_dir)
+                except Exception:
+                    pass
+                    
+                msg = f"Extracted ZIP contents:\n"
+                if manifests_installed > 0:
+                    msg += f"- Installed {manifests_installed} manifest file(s)\n"
+                if luas_installed > 0:
+                    msg += f"- Installed {luas_installed} Lua script(s)\n"
+                if manifests_installed == 0 and luas_installed == 0:
+                    msg += "No .manifest or .lua files were found inside the zip archive."
+                    messagebox.showwarning("Warning", msg)
+                else:
+                    messagebox.showinfo("Success", msg)
+                    
+            self.refresh_installed_list()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to install manually: {e}")
+
+    def update_patch_options(self, parent_id):
+        # Create a beautiful custom modal choice dialog using Toplevel
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Update Patch")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=CAT_BASE)
+        
+        dialog.geometry("380x180")
+        parent_x = self.root.winfo_x()
+        parent_y = self.root.winfo_y()
+        parent_w = self.root.winfo_width()
+        parent_h = self.root.winfo_height()
+        x = parent_x + (parent_w - 380) // 2
+        y = parent_y + (parent_h - 180) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        lbl_msg = tk.Label(
+            dialog,
+            text=f"How would you like to update the manifest/patch\nfor App ID {parent_id}?",
+            font=("Helvetica", 11, "bold"),
+            fg=CAT_TEXT,
+            bg=CAT_BASE,
+            pady=15
+        )
+        lbl_msg.pack()
+        
+        btn_frame = tk.Frame(dialog, bg=CAT_BASE)
+        btn_frame.pack(pady=10)
+        
+        def run_server_update():
+            dialog.destroy()
+            self.start_download_flow(parent_id)
+            
+        def run_local_update():
+            dialog.destroy()
+            self.install_patch_manually_for_appid(parent_id)
+            
+        btn_server = LabelButton(
+            btn_frame,
+            text="Download from Server",
+            command=run_server_update,
+            bg=CAT_BLUE,
+            fg="#0e1621",
+            font=("Helvetica", 9, "bold"),
+            pady=6,
+            padx=12
+        )
+        btn_server.pack(side=tk.LEFT, padx=6)
+        
+        btn_local = LabelButton(
+            btn_frame,
+            text="Choose Local File",
+            command=run_local_update,
+            bg=CAT_SURFACE0,
+            fg=CAT_TEXT,
+            font=("Helvetica", 9, "bold"),
+            pady=6,
+            padx=12,
+            outlined=True
+        )
+        btn_local.pack(side=tk.LEFT, padx=6)
+        
+        btn_cancel = LabelButton(
+            btn_frame,
+            text="Cancel",
+            command=dialog.destroy,
+            bg=CAT_RED,
+            fg="#ffffff",
+            font=("Helvetica", 9, "bold"),
+            pady=6,
+            padx=12
+        )
+        btn_cancel.pack(side=tk.LEFT, padx=6)
+
+    def install_patch_manually_for_appid(self, parent_id):
+        file_path = filedialog.askopenfilename(
+            title=f"Select Patch File for App ID {parent_id}",
+            filetypes=[
+                ("Supported Files", "*.manifest *.lua *.zip"),
+                ("Steam Manifests", "*.manifest"),
+                ("Lua Scripts", "*.lua"),
+                ("Zip Archives", "*.zip"),
+                ("All Files", "*.*")
+            ]
+        )
+        if not file_path:
+            return
+            
+        try:
+            st_plug_dir = os.path.join(self.steam_path, "config/stplug-in")
+            depot_cache = os.path.join(self.steam_path, "depotcache")
+            
+            os.makedirs(st_plug_dir, exist_ok=True)
+            os.makedirs(depot_cache, exist_ok=True)
+            
+            filename = os.path.basename(file_path)
+            
+            if filename.endswith(".manifest"):
+                dest = os.path.join(depot_cache, filename)
+                shutil.copy2(file_path, dest)
+                messagebox.showinfo("Success", f"Successfully updated manifest file:\n{filename}")
+                
+            elif filename.endswith(".lua"):
+                # Automatically rename to match the target App ID
+                dest = os.path.join(st_plug_dir, f"{parent_id}.lua")
+                shutil.copy2(file_path, dest)
+                messagebox.showinfo("Success", f"Successfully installed Lua script as:\n{parent_id}.lua")
+                
+            elif filename.endswith(".zip"):
+                extract_dir = os.path.join(self.temp_dir, f"manual_extract_{int(time.time())}")
+                os.makedirs(extract_dir, exist_ok=True)
+                
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                    
+                manifests_installed = 0
+                luas_installed = 0
+                
+                for root_dir, _, files in os.walk(extract_dir):
+                    for file in files:
+                        fp = os.path.join(root_dir, file)
+                        if file.endswith(".manifest"):
+                            clean_name = os.path.basename(file.replace('\\', '/'))
+                            shutil.copy2(fp, os.path.join(depot_cache, clean_name))
+                            manifests_installed += 1
+                        elif file.endswith(".lua"):
+                            dest_name = f"{parent_id}.lua" if (len([f for f in files if f.endswith(".lua")]) == 1) else os.path.basename(file.replace('\\', '/'))
+                            shutil.copy2(fp, os.path.join(st_plug_dir, dest_name))
+                            luas_installed += 1
+                            
+                try:
+                    shutil.rmtree(extract_dir)
+                except Exception:
+                    pass
+                    
+                msg = f"Extracted ZIP contents:\n"
+                if manifests_installed > 0:
+                    msg += f"- Installed {manifests_installed} manifest file(s)\n"
+                if luas_installed > 0:
+                    msg += f"- Installed {luas_installed} Lua script(s)\n"
+                if manifests_installed == 0 and luas_installed == 0:
+                    msg += "No .manifest or .lua files were found inside the zip archive."
+                    messagebox.showwarning("Warning", msg)
+                else:
+                    messagebox.showinfo("Success", msg)
+                    
+            self.refresh_installed_list()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to install manifest: {e}")
+
 
     # ── TAB 3: SETTINGS VIEW ──
     def render_settings(self):
