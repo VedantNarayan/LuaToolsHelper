@@ -8,6 +8,9 @@
   <b>A premium, open-source macOS utility for managing Steam game patches, manifests, and unlock fixes — built with a sleek Glassmorphic dark UI.</b>
 </p>
 
+> [!NOTE]
+> This is **not** an official version of Lua Tools. It is an independent, custom take on a Manifest Manager application natively built for macOS to simplify patch management.
+
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-blue?logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/python-3.14-green?logo=python&logoColor=white" alt="Python 3.14">
